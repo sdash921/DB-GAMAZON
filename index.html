@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GAmazon — Shop everything, delivered fast</title>
+    <link rel="stylesheet" href="main.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body id="top">
+
+    <!-- ============ NAVBAR ============ -->
+    <header class="navbar">
+        <div class="nav-inner">
+            <a href="#top" class="brand">
+                <span class="brand-mark">G</span>
+                <span class="brand-text">GAmazon</span>
+                <span class="brand-sub">Logistics &amp; Delivery</span>
+            </a>
+
+            <nav class="nav-links">
+                <a href="#shop">Shop</a>
+                <a href="#shop" data-cat="Electronics">Electronics</a>
+                <a href="#shop" data-cat="Home">Home</a>
+                <a href="#shop" data-cat="Fashion">Fashion</a>
+                <a href="#track">Track order</a>
+            </nav>
+
+            <div class="nav-actions">
+                <a href="#track" class="nav-orders">Returns &amp; Orders</a>
+                <button class="cart-btn" id="openCart" aria-label="Open cart">
+                    <span class="cart-icon">🛒</span>
+                    <span class="cart-count" id="cartCount">0</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+        <div class="hero-inner">
+            <p class="eyebrow">Logistics &amp; Delivery System</p>
+            <h1>Shop it. Route it. <span class="accent">Deliver</span> it.</h1>
+            <p class="hero-lead">
+                GAmazon is a logistics and delivery platform. Browse the store, place an
+                order, and follow your parcel through every stage — from the depot to the
+                hands of your driver and finally to your door.
+            </p>
+            <div class="hero-actions">
+                <a href="#shop" class="btn btn-primary">Start shopping</a>
+                <a href="#track" class="btn btn-ghost">Track my order</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ SHOP ============ -->
+    <section class="section" id="shop">
+        <div class="section-head shop-head">
+            <h2>Today's picks</h2>
+            <div class="shop-tools">
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="search" id="searchInput" placeholder="Search GAmazon…" aria-label="Search products">
+                </div>
+                <div class="chips" id="categoryChips">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+        </div>
+
+        <div class="product-grid" id="productGrid">
+            <!-- filled by JS -->
+        </div>
+
+        <p class="empty-msg" id="emptyMsg" hidden>No products match your search. Try another keyword.</p>
+    </section>
+
+    <!-- ============ TRACK ORDER ============ -->
+    <section class="section section-alt" id="track">
+        <div class="section-head">
+            <h2>Track your order</h2>
+            <p>Enter your order number and we'll show you exactly where your parcel is.</p>
+        </div>
+
+        <div class="tracker">
+            <div class="tracker-form">
+                <label for="orderInput">Order number</label>
+                <div class="tracker-row">
+                    <input type="text" id="orderInput" placeholder="e.g. GA-104832" aria-label="Order number">
+                    <button id="trackBtn" class="btn btn-primary">Track</button>
+                </div>
+                <p class="tracker-hint" id="trackerHint">
+                    Tip: try <button class="linky" data-demo="GA-104832">GA-104832</button> or
+                    <button class="linky" data-demo="GA-104840">GA-104840</button>.
+                </p>
+
+                <div class="order-meta" id="orderMeta">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+
+            <div class="timeline" id="timeline" aria-live="polite">
+                <!-- filled by JS -->
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PROMISES ============ -->
+    <section class="section">
+        <div class="promises">
+            <article class="promise">
+                <span class="promise-icon">🏭</span>
+                <h3>Depots &amp; inventory</h3>
+                <p>Every order is picked and packed at a local depot before it ships.</p>
+            </article>
+            <article class="promise">
+                <span class="promise-icon">🗺️</span>
+                <h3>Optimised routes</h3>
+                <p>Parcels are grouped into routes and assigned to a driver and vehicle.</p>
+            </article>
+            <article class="promise">
+                <span class="promise-icon">📍</span>
+                <h3>Real-time tracking</h3>
+                <p>Follow your parcel stage by stage, from the depot to your doorstep.</p>
+            </article>
+        </div>
+    </section>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="footer">
+        <div class="footer-inner">
+            <div class="brand">
+                <span class="brand-mark">G</span>
+                <span class="brand-text">GAmazon</span>
+            </div>
+            <p>Logistics &amp; Delivery Management System — shop, order and track.</p>
+            <p class="footer-note">© <span id="year"></span> GAmazon. All prices in USD.</p>
+        </div>
+    </footer>
+
+    <!-- ============ CART DRAWER ============ -->
+    <div class="drawer-overlay" id="drawerOverlay" hidden></div>
+    <aside class="cart-drawer" id="cartDrawer" aria-hidden="true">
+        <div class="cart-head">
+            <h2>Your cart</h2>
+            <button class="icon-btn" id="closeCart" aria-label="Close cart">✕</button>
+        </div>
+
+        <div class="cart-body" id="cartBody">
+            <!-- filled by JS -->
+        </div>
+
+        <div class="cart-foot">
+            <div class="cart-total">
+                <span>Subtotal</span>
+                <strong id="cartTotal">$0.00</strong>
+            </div>
+            <p class="cart-ship" id="cartShip">Free delivery on orders over $25</p>
+            <button class="btn btn-primary btn-full" id="checkoutBtn">Proceed to checkout</button>
+        </div>
+    </aside>
+
+    <!-- ============ CHECKOUT MODAL ============ -->
+    <div class="modal-overlay" id="checkoutOverlay" hidden>
+        <div class="modal">
+            <div class="modal-head">
+                <h2 id="modalTitle">Checkout</h2>
+                <button type="button" class="icon-btn" id="closeCheckout" aria-label="Close">✕</button>
+            </div>
+
+            <!-- Checkout form -->
+            <div id="checkoutStep">
+                <p class="modal-sub" id="checkoutSummary"></p>
+                <form id="checkoutForm" class="form">
+                    <label>Full name
+                        <input type="text" id="fName" placeholder="Your name" required>
+                    </label>
+                    <label>Email
+                        <input type="email" id="fEmail" placeholder="you@example.com" required>
+                    </label>
+                    <label>Delivery address
+                        <input type="text" id="fAddress" placeholder="Street, city, postcode" required>
+                    </label>
+                    <button type="submit" class="btn btn-primary btn-full">Place order</button>
+                </form>
+            </div>
+
+            <!-- Confirmation -->
+            <div id="confirmStep" hidden>
+                <div class="confirm-badge">✓</div>
+                <h3>Thank you, <span id="confirmName">shopper</span>!</h3>
+                <p class="modal-sub">Your order has been placed and will be delivered to <span
+                        id="confirmAddress"></span>.</p>
+                <div class="order-code">
+                    <span>Your order number</span>
+                    <strong id="confirmOrderId">—</strong>
+                </div>
+                <button class="btn btn-primary btn-full" id="viewTrackingBtn">Track this order</button>
+                <button class="btn btn-ghost btn-full" id="continueBtn">Continue shopping</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="main.js"></script>
+</body>
+
+</html>
