@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# GAmazon — things that should NOT be committed
+# ---------------------------------------------------------------------------
+
+# OS junk
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Node (if a backend is added later)
+node_modules/
+npm-debug.log*
+
+# Secrets — never commit real credentials
+.env
+.env.local
+*.pem
+*.key
+
+# Local scratch files
+*.log
