@@ -32,6 +32,30 @@
 
             <div class="nav-actions">
                 <a href="#track" class="nav-orders">Returns &amp; Orders</a>
+
+                <!-- ===== AUTH: signed-out state ===== -->
+                <button class="nav-auth" id="loginBtn">Sign in</button>
+
+                <!-- ===== AUTH: signed-in state (role chip + account menu) ===== -->
+                <div class="account" id="accountBox" hidden>
+                    <button class="account-btn" id="accountBtn" aria-haspopup="true" aria-expanded="false">
+                        <span class="account-avatar" id="accountAvatar">U</span>
+                        <span class="account-meta">
+                            <span class="account-name" id="accountName">—</span>
+                            <span class="role-chip" id="accountRole">—</span>
+                        </span>
+                    </button>
+                    <div class="account-menu" id="accountMenu" hidden>
+                        <div class="account-menu-head">
+                            <strong id="menuName">—</strong>
+                            <span id="menuEmail">—</span>
+                        </div>
+                        <a href="#workspace" class="account-menu-item" id="menuWorkspace">Role workspace</a>
+                        <a href="#track" class="account-menu-item">My orders</a>
+                        <button class="account-menu-item danger" id="logoutBtn">Sign out</button>
+                    </div>
+                </div>
+
                 <button class="cart-btn" id="openCart" aria-label="Open cart">
                     <span class="cart-icon">🛒</span>
                     <span class="cart-count" id="cartCount">0</span>
@@ -109,6 +133,69 @@
         </div>
     </section>
 
+    <!-- ============ ROLE WORKSPACE (protected area) ============ -->
+    <section class="section section-alt" id="workspace">
+        <div class="section-head">
+            <h2>Role workspace</h2>
+            <p>This whole area is a protected resource. What you see inside depends on the
+                role carried by your signed session token.</p>
+        </div>
+
+        <!-- Signed out -->
+        <div class="locked-panel" id="wsLocked">
+            <span class="locked-icon">🔒</span>
+            <h3>401 — Authentication required</h3>
+            <p>The workspace calls <code>GET /auth/me</code> with your bearer token. Without a valid
+                session the request is rejected, so the panels stay hidden.</p>
+            <div class="locked-actions">
+                <button class="btn btn-primary" id="wsLoginBtn">Sign in</button>
+                <button class="btn btn-ghost" id="wsRegisterBtn">Create an account</button>
+            </div>
+        </div>
+
+        <!-- Signed in -->
+        <div id="wsSignedIn" hidden>
+            <div class="ws-identity">
+                <span class="account-avatar big" id="wsAvatar">U</span>
+                <div>
+                    <h3 id="wsTitle">Workspace</h3>
+                    <p id="wsBlurb"></p>
+                </div>
+                <div class="ws-tags">
+                    <span class="role-chip" id="wsRole">—</span>
+                    <span class="role-chip ghost" id="wsSession">session —</span>
+                </div>
+            </div>
+
+            <div class="ws-tabs" id="wsTabs">
+                <!-- tabs rendered per role by main.js -->
+            </div>
+
+            <div class="ws-panel" id="wsPanel">
+                <!-- active tab rendered by main.js -->
+            </div>
+
+            <!-- Permission matrix — shown to every signed-in user so the RBAC
+                 rules are visible, with the allowed cells highlighted. -->
+            <details class="ws-matrix">
+                <summary>RBAC permission matrix (what each role may call)</summary>
+                <div class="matrix-wrap">
+                    <table class="matrix" id="matrixTable">
+                        <thead>
+                            <tr>
+                                <th>Endpoint permission</th>
+                                <th>Customer</th>
+                                <th>Manager</th>
+                                <th>Admin</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </details>
+        </div>
+    </section>
+
     <!-- ============ PROMISES ============ -->
     <section class="section">
         <div class="promises">
@@ -175,12 +262,23 @@
             <!-- Checkout form -->
             <div id="checkoutStep">
                 <p class="modal-sub" id="checkoutSummary"></p>
-                <form id="checkoutForm" class="form">
+
+                <!-- Signed-out shoppers see this instead of the form: placing an
+                     order is a protected action (orders:create). -->
+                <div class="auth-gate" id="checkoutGate" hidden>
+                    <span class="locked-icon">🔒</span>
+                    <p>Please sign in to place your order. Your basket is kept.</p>
+                    <button type="button" class="btn btn-primary btn-full" id="gateLoginBtn">Sign in</button>
+                    <button type="button" class="btn btn-ghost btn-full" id="gateRegisterBtn">Create an account</button>
+                </div>
+
+                <form id="checkoutForm" class="form" hidden>
+                    <div class="signed-badge" id="signedBadge" hidden></div>
                     <label>Full name
                         <input type="text" id="fName" placeholder="Your name" required>
                     </label>
                     <label>Email
-                        <input type="email" id="fEmail" placeholder="you@example.com" required>
+                        <input type="email" id="fEmail" placeholder="you@example.com" required readonly>
                     </label>
                     <label>Delivery address
                         <input type="text" id="fAddress" placeholder="Street, city, postcode" required>
@@ -205,8 +303,75 @@
         </div>
     </div>
 
+    <!-- ============ AUTH MODAL (sign in / create account) ============ -->
+    <div class="modal-overlay" id="authOverlay" hidden>
+        <div class="modal auth-modal">
+            <div class="modal-head">
+                <h2 id="authTitle">Sign in</h2>
+                <button type="button" class="icon-btn" id="closeAuth" aria-label="Close">✕</button>
+            </div>
+
+            <div class="auth-tabs" role="tablist">
+                <button class="auth-tab active" data-auth-tab="login" role="tab">Sign in</button>
+                <button class="auth-tab" data-auth-tab="register" role="tab">Create account</button>
+            </div>
+
+            <p class="auth-msg" id="authMsg" hidden></p>
+
+            <!-- ---- LOGIN ---- -->
+            <form class="form" id="loginForm">
+                <label>Email
+                    <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="username" required>
+                </label>
+                <label>Password
+                    <input type="password" id="loginPassword" placeholder="Your password" autocomplete="current-password" required>
+                </label>
+                <button type="submit" class="btn btn-primary btn-full">Sign in</button>
+            </form>
+
+            <!-- ---- REGISTER ---- -->
+            <form class="form" id="registerForm" hidden>
+                <label>Full name
+                    <input type="text" id="regName" placeholder="Your name" autocomplete="name" required>
+                </label>
+                <label>Email
+                    <input type="email" id="regEmail" placeholder="you@example.com" autocomplete="email" required>
+                </label>
+                <label>Password
+                    <input type="password" id="regPassword" placeholder="Min. 8 chars" autocomplete="new-password" required>
+                </label>
+                <ul class="pw-rules" id="pwRules">
+                    <li data-rule="length">At least 8 characters</li>
+                    <li data-rule="upper">One uppercase letter</li>
+                    <li data-rule="lower">One lowercase letter</li>
+                    <li data-rule="digit">One digit</li>
+                </ul>
+                <p class="hash-note">Your password is hashed with PBKDF2-SHA256 (120 000 iterations + random
+                    salt) before it is stored. The plain text never leaves this form.</p>
+                <button type="submit" class="btn btn-primary btn-full">Create my account</button>
+            </form>
+
+            <!-- ---- DEMO ACCOUNTS ---- -->
+            <div class="demo-accounts">
+                <p>One-click demo accounts (password is shown next to each role):</p>
+                <div class="demo-account-grid">
+                    <button type="button" class="demo-account" data-role="user" data-email="user@gamazon.dev" data-password="User1234">
+                        <span>🛍️</span><strong>Customer</strong><code>User1234</code>
+                    </button>
+                    <button type="button" class="demo-account" data-role="manager" data-email="manager@gamazon.dev" data-password="Manager1234">
+                        <span>🚚</span><strong>Manager</strong><code>Manager1234</code>
+                    </button>
+                    <button type="button" class="demo-account" data-role="admin" data-email="admin@gamazon.dev" data-password="Admin1234">
+                        <span>🛡️</span><strong>Admin</strong><code>Admin1234</code>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="toast" id="toast" hidden></div>
 
+    <script src="auth.js"></script>
     <script src="main.js"></script>
 </body>
 

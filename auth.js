@@ -1,33 +1,41 @@
 /* ==========================================================================
-   GAmazon — AUTH & RBAC LAYER  (Week 5)
+   GAmazon — AUTH & RBAC LAYER  (now backed by the Node.js / Express API)
    --------------------------------------------------------------------------
-   This file adds authentication and the role model on top of the storefront.
-   It is written the same way as main.js: everything is a small "table" plus
-   query-like functions, so it maps 1:1 onto the database design.
+   This file used to fake authentication entirely in the browser (PBKDF2 hashing
+   + a self-signed HMAC token + in-memory arrays). It now talks to the real
+   backend in `backend/backend`:
 
-   Tables
-   ------
-   USERS            (user_id, name, email UNIQUE, password_hash, role_id, created_at)
-   ROLES            (role_id, role_name)
-   SESSIONS         (session_id, user_id, token_id, issued_at, expires_at)
-   LOGIN_ATTEMPTS   (email, failed_count, locked_until)      -- brute-force guard
-   AUDIT_LOG        (log_id, user_id, action, target, at)    -- admin-only view
+       POST /api/auth/register   { first_name, last_name, phone, email, password }
+       POST /api/auth/login      { email, password }        -> { token, user }
+       GET  /api/profile         Authorization: Bearer <token>
+       GET  /api/customer        (role: Customer | Admin)
+       GET  /api/manager         (role: Manager  | Admin)
+       GET  /api/admin           (role: Admin)
+
+   The public surface (`Auth.register`, `Auth.login`, `Auth.logout`, `Auth.me`,
+   `Auth.requireAuth`, `Auth.can`, `Auth.PERMISSIONS`, ...) is kept identical so
+   main.js did not have to change its call sites. The difference is that every
+   call now performs a real HTTP request and the role is decided by the SERVER
+   from the signed JWT — the browser can no longer grant itself a role.
 
    Security notes (important for the defence)
    ------------------------------------------
-   * Passwords are NEVER stored in plain text. They are hashed with PBKDF2
-     (SHA-256, 120 000 iterations, random 16-byte salt) — the same family of
-     algorithm as bcrypt/argon2: deliberately slow + salted.
-   * Sessions are stateless-ish "JWTs": a signed token (HMAC-SHA256 over
-     base64url(header).base64url(payload)) that carries sub/role/exp/jti.
-     The signature is verified on EVERY request, so a tampered payload or an
-     expired token is rejected — that is what makes an endpoint "protected".
-   * The front-end can never grant itself a role: the role inside the token is
-     signed by the server key. Editing localStorage invalidates the signature.
-   * In the browser we can only *demonstrate* this. In the real deployment the
-     same logic runs server-side: the key is a server secret, the token is an
-     HttpOnly cookie, and the DB enforces the UNIQUE(email) constraint.
+   * Passwords are NEVER stored in plain text. They are hashed with bcrypt
+     (10 salt rounds) in routes/auth.js, on the server.
+   * The token is a real JWT signed with JWT_SECRET (HS256). It is verified by
+     middleware/auth.js on EVERY protected request, so a tampered or expired
+     token is rejected with 403 — that is what makes an endpoint "protected".
+   * The front-end can never grant itself a role: the role lives inside the
+     signed token, and middleware/role.js compares it on the server.
    ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   API CONFIGURATION
+   --------------------------------------------------------------------------
+   The page is usually opened straight from disk (file://) while the API runs on
+   http://localhost:3000. Change API_BASE if your server uses another port/host.
+   -------------------------------------------------------------------------- */
+const API_BASE = "http://localhost:3000";
 
 /* --------------------------------------------------------------------------
    1. ROLES TABLE  — the role model
@@ -37,6 +45,19 @@ const ROLES = [
     { role_id: 2, role_name: "manager" },
     { role_id: 3, role_name: "admin" }
 ];
+
+/* The database stores `Customer`, `Manager`, `Admin`; the UI uses the lowercase
+   keys `user`, `manager`, `admin`. These two helpers translate between them so
+   the rest of the app (and the CSS) keeps working unchanged. */
+function toUiRole(dbRole) {
+    const map = { customer: "user", manager: "manager", admin: "admin", user: "user" };
+    return map[String(dbRole || "").trim().toLowerCase()] || "user";
+}
+
+function toDbRole(uiRole) {
+    const map = { user: "Customer", manager: "Manager", admin: "Admin", customer: "Customer" };
+    return map[String(uiRole || "").trim().toLowerCase()] || "Customer";
+}
 
 /* Human-readable labels + the "different interface" each role gets. */
 const ROLE_INFO = {
@@ -68,127 +89,100 @@ const PERMISSIONS = {
 /* The public storefront does not need a session. */
 const PUBLIC_ENDPOINTS = ["products:read"];
 
+/* Which backend endpoint PROVES a given permission. middleware/role.js answers
+   403 for a role that is not allowed, which is exactly what we surface in the
+   UI — the server, not the browser, makes the decision. */
+const PERMISSION_ENDPOINT = {
+    "orders:read:own": "/api/customer",
+    "orders:read:all": "/api/manager",
+    "orders:update:status": "/api/manager",
+    "routes:manage": "/api/manager",
+    "users:read": "/api/admin",
+    "users:update:role": "/api/admin",
+    "audit:read": "/api/admin"
+};
+
 /* --------------------------------------------------------------------------
-   3. CRYPTO HELPERS
+   3. HTTP HELPER
+   --------------------------------------------------------------------------
+   One place that adds the bearer token and turns every non-2xx response into a
+   plain { ok:false, status, error } object, so the callers never have to deal
+   with Response objects or thrown exceptions.
    -------------------------------------------------------------------------- */
+async function apiFetch(path, { method = "GET", body, token } = {}) {
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (token) headers["Authorization"] = `Bearer ${token}`;
 
-/* Web Crypto (crypto.subtle) only exists in a secure context: https://, localhost
-   or file://. Over plain http:// on a LAN address it is `undefined`, and every
-   call below would throw a confusing "cannot read properties of undefined".
-   Checked once, up front, so the UI can explain the real problem. */
-function cryptoAvailable() {
-    return typeof crypto !== "undefined" && !!crypto.subtle;
-}
-
-function assertCrypto() {
-    if (!cryptoAvailable()) {
-        throw new Error(
-            "Web Crypto is unavailable. Open this page over https://, http://localhost " +
-            "or file:// — password hashing and token signing need a secure context."
-        );
+    let res;
+    try {
+        res = await fetch(API_BASE + path, {
+            method,
+            headers,
+            body: body === undefined ? undefined : JSON.stringify(body)
+        });
+    } catch (err) {
+        /* fetch() only rejects on a network-level failure: the Node server is
+           not running, the port is wrong, or the browser blocked the request. */
+        return {
+            ok: false,
+            status: 0,
+            error: `Cannot reach the API at ${API_BASE}. Is the Node server running? ` +
+                `(cd backend/backend && npm start)`
+        };
     }
-}
 
-/* Random bytes -> hex. */
-function randomHex(bytes) {
-    assertCrypto();
-    const buf = new Uint8Array(bytes);
-    crypto.getRandomValues(buf);
-    return [...buf].map(b => b.toString(16).padStart(2, "0")).join("");
-}
+    let data = null;
+    try { data = await res.json(); } catch { /* empty or non-JSON body */ }
 
-/* base64url encode/decode (JWT uses url-safe base64, no padding). */
-function b64urlEncode(str) {
-    return btoa(unescape(encodeURIComponent(str)))
-        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function b64urlDecode(str) {
-    const pad = str.length % 4 ? "=".repeat(4 - (str.length % 4)) : "";
-    return decodeURIComponent(escape(atob(str.replace(/-/g, "+").replace(/_/g, "/") + pad)));
-}
-
-const encoder = new TextEncoder();
-
-/* PBKDF2-SHA256, 120k iterations -> "pbkdf2$iterations$salt$hash" */
-async function hashPassword(password, saltHex = randomHex(16), iterations = 120000) {
-    const salt = Uint8Array.from(saltHex.match(/.{2}/g).map(h => parseInt(h, 16)));
-    const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-    const bits = await crypto.subtle.deriveBits(
-        { name: "PBKDF2", salt, iterations, hash: "SHA-256" }, key, 256
-    );
-    const hash = [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
-    return `pbkdf2$${iterations}$${saltHex}$${hash}`;
-}
-
-/* Constant-time-ish comparison of two hex digests. */
-function safeEqual(a, b) {
-    if (a.length !== b.length) return false;
-    let diff = 0;
-    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    return diff === 0;
-}
-
-/* Verify a plain password against a stored hash string. */
-async function verifyPassword(password, stored) {
-    const [algo, iterations, saltHex, hash] = stored.split("$");
-    if (algo !== "pbkdf2") return false;
-    const recomputed = await hashPassword(password, saltHex, Number(iterations));
-    return safeEqual(recomputed.split("$")[3], hash);
+    if (!res.ok) {
+        return {
+            ok: false,
+            status: res.status,
+            error: (data && (data.message || data.error)) || `Request failed (${res.status})`,
+            data
+        };
+    }
+    return { ok: true, status: res.status, data };
 }
 
 /* --------------------------------------------------------------------------
-   4. TOKEN (JWT-style, HS256) — issue + verify
+   4. SESSION HELPERS
    -------------------------------------------------------------------------- */
-const TOKEN_KEY = "gamazon-demo-signing-key-do-not-use-in-production";
-const TOKEN_TTL_MS = 30 * 60 * 1000;   /* 30 minutes */
-
-async function hmacKey() {
-    return crypto.subtle.importKey(
-        "raw", encoder.encode(TOKEN_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
-    );
+/* Read the payload of the server-issued JWT (base64url) WITHOUT verifying it.
+   Verification happens on the server; we only look at `exp` so the UI can drop
+   a token it already knows is expired. */
+function decodeJwt(token) {
+    try {
+        const part = token.split(".")[1];
+        const pad = part.length % 4 ? "=".repeat(4 - (part.length % 4)) : "";
+        const json = decodeURIComponent(escape(atob(part.replace(/-/g, "+").replace(/_/g, "/") + pad)));
+        return JSON.parse(json);
+    } catch { return null; }
 }
 
-/* Header + payload + signature. This is a real HS256 JWT shape. */
-async function signToken(payload) {
-    const header = b64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-    const body = b64urlEncode(JSON.stringify(payload));
-    const data = `${header}.${body}`;
-    const sigBits = await crypto.subtle.sign("HMAC", await hmacKey(), encoder.encode(data));
-    const sig = btoa(String.fromCharCode(...new Uint8Array(sigBits)))
-        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    return `${data}.${sig}`;
-}
-
-/* Verify signature + expiry. Returns the payload or null. */
-async function verifyToken(token) {
-    if (!token || token.split(".").length !== 3) return null;
-    const [header, body, sig] = token.split(".");
-    const expected = await crypto.subtle.sign("HMAC", await hmacKey(), encoder.encode(`${header}.${body}`));
-    const expectedB64 = btoa(String.fromCharCode(...new Uint8Array(expected)))
-        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    if (!safeEqual(expectedB64, sig)) return null;         /* tampered token */
-    let payload;
-    try { payload = JSON.parse(b64urlDecode(body)); } catch { return null; }
-    if (!payload.exp || payload.exp < Date.now()) return null;  /* expired */
-    return payload;
+/* The backend answers { user_id, customer_id, email, role } from /login and
+   /profile. Normalise it into the shape the rest of the app expects (role in
+   UI form, plus a display name that the API may not send). */
+function normaliseUser(user) {
+    if (!user) return null;
+    return {
+        user_id: user.user_id,
+        customer_id: user.customer_id,
+        email: user.email,
+        role: toUiRole(user.role),
+        name: user.name || user.full_name ||
+            [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+            user.email
+    };
 }
 
 /* --------------------------------------------------------------------------
-   5. DATA STORES
+   5. PASSWORD POLICY
+   --------------------------------------------------------------------------
+   Client-side feedback only. The real hash is computed with bcrypt on the
+   server (routes/auth.js), never in the browser.
    -------------------------------------------------------------------------- */
-const USERS = [];              /* USERS table                     */
-const SESSIONS = [];           /* SESSIONS table (server side)    */
-const LOGIN_ATTEMPTS = {};     /* email -> { fails, lockedUntil } */
-const AUDIT_LOG = [];          /* AUDIT_LOG table                 */
-
-let nextUserId = 1;
-let nextLogId = 1;
-
-const MAX_FAILS = 5;
-const LOCK_MS = 60 * 1000;     /* 5 wrong passwords -> 1 minute lockout */
-
-/* Password policy — checked on the client AND (conceptually) on the server. */
 function passwordProblems(password) {
     const problems = [];
     if (password.length < 8) problems.push("at least 8 characters");
@@ -198,217 +192,148 @@ function passwordProblems(password) {
     return problems;
 }
 
-function audit(userId, action, target = "-") {
-    AUDIT_LOG.unshift({
-        log_id: nextLogId++,
-        user_id: userId,
-        action,
-        target,
-        at: new Date().toLocaleString("en-GB", { hour12: false })
-    });
-}
-
-/* SELECT * FROM users WHERE email = ? */
-function findUserByEmail(email) {
-    return USERS.find(u => u.email === email.trim().toLowerCase()) || null;
-}
-
-function findUserById(id) {
-    return USERS.find(u => u.user_id === id) || null;
-}
-
-function roleNameOf(user) {
-    return ROLES.find(r => r.role_id === user.role_id)?.role_name || "user";
-}
-
-/* Public shape of a user — NEVER contains password_hash. */
-function publicUser(user) {
-    return { user_id: user.user_id, name: user.name, email: user.email, role: roleNameOf(user) };
-}
-
 /* --------------------------------------------------------------------------
-   6. AUTH API  — register / login / logout / me
+   6. AUTH API  — register / login / logout / me  (all real HTTP calls)
    -------------------------------------------------------------------------- */
 
-/* POST /auth/register */
-async function apiRegister({ name, email, password }) {
-    await seeded;                     /* make sure the demo rows exist first */
-
-    if (!cryptoAvailable()) {
-        return { ok: false, status: 503, error: "Registration needs a secure context (https://, localhost or file://) to hash the password." };
-    }
-
+/* POST /api/auth/register
+   The backend expects first_name / last_name / phone separately, while the form
+   only collects a full name. Split it: everything after the first word becomes
+   the last name; phone is optional. */
+async function apiRegister({ name, email, password, phone }) {
     const cleanName = (name || "").trim();
     const cleanEmail = (email || "").trim().toLowerCase();
 
+    /* The same checks the form shows, so we fail fast without a round-trip. */
     if (cleanName.length < 2) return { ok: false, status: 422, error: "Please enter your full name." };
     if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(cleanEmail)) return { ok: false, status: 422, error: "That email address looks invalid." };
 
     const problems = passwordProblems(password || "");
     if (problems.length) return { ok: false, status: 422, error: "Password needs " + problems.join(", ") + "." };
 
-    /* UNIQUE(email) constraint */
-    if (findUserByEmail(cleanEmail)) return { ok: false, status: 409, error: "An account with this email already exists." };
+    const parts = cleanName.split(/\s+/);
+    const first_name = parts[0];
+    const last_name = parts.slice(1).join(" ") || "-";
 
-    const user = {
-        user_id: nextUserId++,
-        name: cleanName,
-        email: cleanEmail,
-        password_hash: await hashPassword(password),
-        role_id: 1,                          /* every new account is a customer */
-        created_at: new Date()
-    };
-    USERS.push(user);
-    audit(user.user_id, "auth:register", user.email);
+    const res = await apiFetch("/api/auth/register", {
+        method: "POST",
+        body: { first_name, last_name, phone: phone || null, email: cleanEmail, password }
+    });
 
-    const session = await issueSession(user);
-    return { ok: true, status: 201, user: publicUser(user), token: session.token, session_id: session.session_id };
+    if (!res.ok) {
+        /* The backend answers 400 "User with this email already exists". */
+        return { ok: false, status: res.status, error: res.error };
+    }
+
+    /* Registration does not return a token, so sign in straight away. */
+    const login = await apiLogin({ email: cleanEmail, password });
+    if (!login.ok) {
+        return { ok: false, status: login.status, error: "Account created, but automatic sign-in failed. Please sign in." };
+    }
+    return login;
 }
 
-/* POST /auth/login */
+/* POST /api/auth/login -> { message, token, user } */
 async function apiLogin({ email, password }) {
-    /* A typed password is checked against a PBKDF2 hash, so wait for the
-       background seeding to finish first. */
-    await seeded;
-
     const cleanEmail = (email || "").trim().toLowerCase();
-    const attempt = LOGIN_ATTEMPTS[cleanEmail];
 
-    if (!cryptoAvailable()) {
-        return { ok: false, status: 503, error: "Password sign-in needs a secure context (https://, localhost or file://). Use the one-click role buttons above instead." };
-    }
+    const res = await apiFetch("/api/auth/login", {
+        method: "POST",
+        body: { email: cleanEmail, password }
+    });
 
-    if (attempt?.lockedUntil > Date.now()) {
-        const secs = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
-        return { ok: false, status: 429, error: `Too many failed attempts. Try again in ${secs}s.` };
-    }
-
-    const user = findUserByEmail(cleanEmail);
-    /* Same message for "no such user" and "wrong password" — never leak which
-       emails are registered (user enumeration). */
-    const okPassword = user ? await verifyPassword(password || "", user.password_hash) : false;
-
-    if (!user || !okPassword) {
-        const fails = (attempt?.fails || 0) + 1;
-        LOGIN_ATTEMPTS[cleanEmail] = {
-            fails,
-            lockedUntil: fails >= MAX_FAILS ? Date.now() + LOCK_MS : 0
+    if (!res.ok) {
+        return {
+            ok: false,
+            status: res.status,
+            /* 401 is the backend's "Invalid email or password". */
+            error: res.status === 401 ? "Wrong email or password." : res.error
         };
-        audit(user?.user_id ?? null, "auth:login_failed", cleanEmail);
-        return { ok: false, status: 401, error: "Wrong email or password." };
     }
 
-    delete LOGIN_ATTEMPTS[cleanEmail];
-    audit(user.user_id, "auth:login", user.email);
-    const session = await issueSession(user);
-    return { ok: true, status: 200, user: publicUser(user), token: session.token, session_id: session.session_id };
-}
-
-/* --------------------------------------------------------------------------
-   POST /auth/login-as-role  —  the one-click demo sign-in
-   --------------------------------------------------------------------------
-   Signs in as the seeded account for a role WITHOUT hashing a password.
-
-   Why this exists: the demo buttons must work on every machine, including
-   browsers where Web Crypto (crypto.subtle) is unavailable — that API is only
-   exposed in a secure context (https://, localhost, file://), so over plain
-   http:// on a LAN address the normal login path cannot hash anything and the
-   button would silently do nothing.
-
-   This path is for the classroom demo only. The password route above stays the
-   real one: it verifies a bcrypt/PBKDF2 hash and is the endpoint to point at
-   when explaining how authentication actually works.
-   -------------------------------------------------------------------------- */
-async function apiLoginAsRole(role) {
-    const user = USERS.find(u => roleNameOf(u) === role);
-    if (!user) {
-        return { ok: false, status: 404, error: `No demo account with role "${role}".` };
-    }
-
-    audit(user.user_id, "auth:login_demo", `${user.email} (role button)`);
-
-    /* The session token still carries the role, so the RBAC guard behaves
-       exactly as it does for a password login. */
-    const session = await issueSession(user);
+    const { token, user } = res.data;
     return {
         ok: true,
         status: 200,
-        user: publicUser(user),
-        token: session.token,
-        session_id: session.session_id
+        token,
+        user: normaliseUser(user),
+        session_id: decodeJwt(token)?.jti || null
     };
 }
 
-/* Creates a SESSIONS row and returns { token, session_id }. */
-async function issueSession(user) {
-    const sessionId = "S-" + randomHex(4);
-    const token = await signToken({
-        sub: user.user_id,
-        email: user.email,
-        role: roleNameOf(user),
-        jti: sessionId,
-        iat: Date.now(),
-        exp: Date.now() + TOKEN_TTL_MS
-    });
-    SESSIONS.push({
-        session_id: sessionId,
-        user_id: user.user_id,
-        token_id: token.split(".")[2].slice(0, 12),
-        issued_at: new Date(),
-        expires_at: new Date(Date.now() + TOKEN_TTL_MS)
-    });
-    return { token, session_id: sessionId };
-}
-
-/* The session row created by the last issueSession() call. The UI reads it so
-   the "sign out" call can actually invalidate the server-side row. */
-function currentSession() {
-    return SESSIONS[SESSIONS.length - 1] || null;
-}
-
-/* POST /auth/logout — invalidate the session row. */
-function apiLogout(sessionId, userId) {
-    const i = SESSIONS.findIndex(s => s.session_id === sessionId);
-    if (i >= 0) SESSIONS.splice(i, 1);
-    audit(userId, "auth:logout", sessionId || "-");
+/* The backend has no logout route: the token is stateless, so signing out is
+   purely a client-side act (drop the token). Kept async and object-returning so
+   main.js did not have to change. */
+async function apiLogout() {
     return { ok: true, status: 200 };
 }
 
-/* GET /auth/me — who am I? (token verified, then the user is re-read from DB
-   so a role change takes effect on the next request). */
+/* GET /api/profile — "who am I?" (the token is verified by the server). */
 async function apiMe(token) {
-    const payload = await verifyToken(token);
-    if (!payload) return { ok: false, status: 401, error: "Invalid or expired session." };
-    const user = findUserById(payload.sub);
-    if (!user) return { ok: false, status: 401, error: "Account no longer exists." };
-    return { ok: true, status: 200, user: publicUser(user), session: payload };
+    if (!token) return { ok: false, status: 401, error: "No session token." };
+
+    /* Cheap local check first: never call the API with a token we already know
+       has expired. */
+    const payload = decodeJwt(token);
+    if (payload?.exp && payload.exp * 1000 < Date.now()) {
+        return { ok: false, status: 401, error: "Session expired." };
+    }
+
+    const res = await apiFetch("/api/profile", { token });
+    if (!res.ok) return { ok: false, status: res.status, error: res.error };
+
+    return { ok: true, status: 200, user: normaliseUser(res.data.user), session: payload };
 }
 
 /* --------------------------------------------------------------------------
    7. THE GUARD — protect an endpoint
    --------------------------------------------------------------------------
-   requireAuth("orders:read:all")(token)  ->  { ok:false, status:403 } if the
-   role in the SIGNED token is not in the permission matrix. Every protected
-   action in main.js goes through this, which is what the professor sees when
-   a customer tries to open the admin API from the console.
+   requireAuth("orders:read:all")(token) asks the BACKEND endpoint that proves
+   the permission. A Customer calling the admin endpoint gets a real 403 from
+   middleware/role.js — which is exactly what the workspace shows.
    -------------------------------------------------------------------------- */
 function requireAuth(permission) {
     return async function (token) {
-        const me = await apiMe(token);
-        if (!me.ok) return me;                                     /* 401 */
+        if (PUBLIC_ENDPOINTS.includes(permission)) {
+            return { ok: true, status: 200, user: null };
+        }
 
-        const allowed = PERMISSIONS[permission] || [];
-        if (!allowed.includes(me.user.role)) {
-            audit(me.user.user_id, "authz:denied", permission);
+        /* First establish who the caller is (401 if the token is bad/expired). */
+        const me = await apiMe(token);
+        if (!me.ok) return me;
+
+        const endpoint = PERMISSION_ENDPOINT[permission];
+
+        /* No dedicated endpoint for this permission (e.g. orders:create): fall
+           back to the matrix. The UI still cannot escalate — every real mutation
+           is sent to the server, which re-checks the role from the token. */
+        if (!endpoint) {
+            const allowed = PERMISSIONS[permission] || [];
+            if (!allowed.includes(me.user.role)) {
+                return {
+                    ok: false,
+                    status: 403,
+                    error: `Forbidden — "${permission}" requires ${allowed.join(" / ")}, you are ${me.user.role}.`,
+                    requiredRoles: allowed,
+                    yourRole: me.user.role
+                };
+            }
+            return { ok: true, status: 200, user: me.user, session: me.session };
+        }
+
+        /* Ask the server: a role that is not allowed gets 403 from the API. */
+        const check = await apiFetch(endpoint, { token });
+        if (!check.ok) {
             return {
                 ok: false,
-                status: 403,
-                error: `Forbidden — "${permission}" requires ${allowed.join(" / ")}, you are ${me.user.role}.`,
-                requiredRoles: allowed,
+                status: check.status,
+                error: check.status === 403
+                    ? `Forbidden — "${permission}" is not allowed for the ${me.user.role} role.`
+                    : check.error,
                 yourRole: me.user.role
             };
         }
-        return { ok: true, status: 200, user: me.user, session: me.session };
+        return { ok: true, status: 200, user: me.user, session: me.session, data: check.data };
     };
 }
 
@@ -419,91 +344,52 @@ function can(role, permission) {
 }
 
 /* --------------------------------------------------------------------------
-   8. SEED ACCOUNTS — one per role, so the demo is instant
+   8. DEMO ACCOUNTS
    --------------------------------------------------------------------------
-   These three accounts are created SYNCHRONOUSLY, the moment auth.js loads.
-
-   Why synchronous: hashing three passwords with PBKDF2 takes ~300 ms, and any
-   click landing in that window used to fail with
-   "No demo account with role \"admin\"". The USERS rows are now pushed first
-   (so they always exist), and the password hashes are filled in afterwards.
-   ========================================================================== */
+   Accounts now live in PostgreSQL, created by the backend. These are the three
+   the UI's one-click buttons offer — they must exist in the `users` table with
+   the matching bcrypt hash and role. See the SQL in the summary to insert them.
+   -------------------------------------------------------------------------- */
 const SEED_ACCOUNTS = [
-    { name: "Alice Customer", email: "user@gamazon.dev", password: "User1234", role_id: 1 },
-    { name: "Marco Manager", email: "manager@gamazon.dev", password: "Manager1234", role_id: 2 },
-    { name: "Ada Admin", email: "admin@gamazon.dev", password: "Admin1234", role_id: 3 }
+    { name: "Alice Customer", email: "user@gamazon.dev", password: "User1234", role: "user" },
+    { name: "Marco Manager", email: "manager@gamazon.dev", password: "Manager1234", role: "manager" },
+    { name: "Ada Admin", email: "admin@gamazon.dev", password: "Admin1234", role: "admin" }
 ];
 
-/* Created immediately — the table is never empty, so a role button can never
-   report "no demo account". */
-SEED_ACCOUNTS.forEach(s => {
-    USERS.push({
-        user_id: nextUserId++,
-        name: s.name,
-        email: s.email,
-        password_hash: null,          /* filled in by seedUsers() below */
-        role_id: s.role_id,
-        created_at: new Date()
-    });
-});
+/* main.js awaits `Auth.seeded` before relying on the password form. Nothing is
+   hashed in the browser any more, so this resolves immediately. */
+const seeded = Promise.resolve(true);
 
-/* Fill in the real PBKDF2 hashes. Runs in the background; `seeded` tells the
-   rest of the app when the password login path is ready. */
-let resolveSeeded;
-const seeded = new Promise(res => { resolveSeeded = res; });
-
-async function seedUsers() {
-    /* Already done (e.g. main.js called us twice) — nothing to do. */
-    if (USERS.every(u => u.password_hash)) {
-        resolveSeeded();
-        return;
-    }
-
-    if (!cryptoAvailable()) {
-        /* No Web Crypto (insecure context). The role buttons still work — they
-           do not need hashes — and the password form explains itself. */
-        console.warn("GAmazon auth: Web Crypto unavailable — demo role buttons work, " +
-            "password login/registration does not.");
-        resolveSeeded();
-        return;
-    }
-
-    for (const s of SEED_ACCOUNTS) {
-        const user = findUserByEmail(s.email);
-        if (user && !user.password_hash) {
-            user.password_hash = await hashPassword(s.password);
-        }
-    }
-    audit(null, "system:seed", `${SEED_ACCOUNTS.length} demo accounts`);
-    resolveSeeded();
-}
+/* Kept so the demo UI can call seedUsers() without a ReferenceError. */
+async function seedUsers() { return true; }
 
 /* --------------------------------------------------------------------------
    9. PUBLIC SURFACE
    --------------------------------------------------------------------------
-   `Auth` is what main.js and the browser console use. The console is also how
-   the protected endpoints get demonstrated:
-       await DEMO.api("admin", "users:read")            -> 200
-       await DEMO.api("user",  "users:read")            -> 403 Forbidden
+   `Auth` is what main.js and the browser console use. Every call below now
+   performs a real HTTP request against the Express API:
+
+       await Auth.login({ email: "user@gamazon.dev", password: "User1234" })
+       await Auth.me(token)
+       await Auth.requireAuth("users:read")(token)   -> 403 for a Customer
    -------------------------------------------------------------------------- */
 const Auth = {
+    API_BASE,
     ROLES, ROLE_INFO, PERMISSIONS, PUBLIC_ENDPOINTS,
-    USERS, SESSIONS, AUDIT_LOG,
-    cryptoAvailable,
+    SEED_ACCOUNTS,
     seeded,
     register: apiRegister,
     login: apiLogin,
-    loginAsRole: apiLoginAsRole,
     logout: apiLogout,
     me: apiMe,
-    currentSession,
     requireAuth,
     can,
-    verifyToken,
     passwordProblems,
-    findUserById,
-    roleNameOf,
-    publicUser
+    toUiRole,
+    toDbRole,
+    normaliseUser,
+    decodeJwt,
+    fetch: apiFetch
 };
 
 window.Auth = Auth;
