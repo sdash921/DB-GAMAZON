@@ -1536,6 +1536,22 @@ img {
     color: var(--text-muted);
 }
 
+/* Raw JSON returned by the API, shown in the admin-only workspace tabs. */
+.ws-json {
+    margin: 0;
+    padding: 1rem;
+    max-height: 20rem;
+    overflow: auto;
+    background: var(--surface-alt, #f4f6fb);
+    border: 1px solid var(--border, #e2e6f0);
+    border-radius: 10px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .ws-table {
     display: grid;
     gap: 0.5rem;

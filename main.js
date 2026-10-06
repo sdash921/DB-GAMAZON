@@ -637,6 +637,11 @@ const authMsg = document.getElementById("authMsg");
 const loginForm = document.getElementById("loginForm");
 const registerForm = document.getElementById("registerForm");
 
+/* The auth modal lives in index.html, which loads this file after auth.js. The
+   whole block below is skipped when those elements are absent (e.g. if main.js
+   is reused on a page without the modal), instead of throwing on load. */
+const HAS_AUTH_UI = !!(authOverlay && loginForm && registerForm);
+
 const ROLE_LABEL = role => Auth.ROLE_INFO[role]?.label || role;
 const ROLE_ICON = role => Auth.ROLE_INFO[role]?.icon || "👤";
 
@@ -731,20 +736,20 @@ function renderAuthState() {
 }
 
 /* ---- login / register / logout ---- */
-loginForm.addEventListener("submit", async e => {
+if (HAS_AUTH_UI) loginForm.addEventListener("submit", async e => {
     e.preventDefault();
     const res = await Auth.login({
         email: document.getElementById("loginEmail").value,
         password: document.getElementById("loginPassword").value
     });
     if (!res.ok) return authError(res.error);
-    applySession({ token: res.token, user: res.user, session_id: Auth.currentSession()?.session_id });
+    applySession({ token: res.token, user: res.user, session_id: res.session_id });
     loginForm.reset();
     closeAuth();
     toast(`Welcome back, ${res.user.name.split(" ")[0]} — ${ROLE_LABEL(res.user.role)}`);
 });
 
-registerForm.addEventListener("submit", async e => {
+if (HAS_AUTH_UI) registerForm.addEventListener("submit", async e => {
     e.preventDefault();
     const res = await Auth.register({
         name: document.getElementById("regName").value,
@@ -752,7 +757,7 @@ registerForm.addEventListener("submit", async e => {
         password: document.getElementById("regPassword").value
     });
     if (!res.ok) return authError(res.error);
-    applySession({ token: res.token, user: res.user, session_id: Auth.currentSession()?.session_id });
+    applySession({ token: res.token, user: res.user, session_id: res.session_id });
     registerForm.reset();
     updatePwRules("");
     closeAuth();
@@ -841,7 +846,7 @@ function renderWorkspace() {
     renderMatrix();
 }
 
-function renderWsPanel(tab) {
+async function renderWsPanel(tab) {
     const panel = document.getElementById("wsPanel");
     const u = SESSION.user;
     const myOrders = getOrdersByCustomer(u.customer_id);
@@ -876,40 +881,34 @@ function renderWsPanel(tab) {
     }
 
     if (tab === "users") {
+        /* users:read is admin-only. Ask the SERVER — a non-admin gets a real
+           403 from middleware/role.js, which is what makes RBAC verifiable. */
+        const guard = await Auth.requireAuth("users:read")(SESSION?.token);
+        if (!guard.ok) {
+            panel.innerHTML = `
+                <h4>Users &amp; roles</h4>
+                <p class="ws-note">HTTP ${guard.status} — ${guard.error}</p>`;
+            return;
+        }
         panel.innerHTML = `
-            <h4>Users &amp; roles <span class="ws-count">${Auth.USERS.length}</span></h4>
-            <p class="ws-note">Only an administrator may read this table. Changing a role rewrites
-                USERS.role_id — and the change is visible immediately because the role is re-read
-                from the database on every request.</p>
-            <div class="ws-table">
-                ${Auth.USERS.map(x => `
-                    <div class="ws-row">
-                        <div>
-                            <strong>${x.name}</strong>
-                            <span class="ws-sub">${x.email}</span>
-                        </div>
-                        <span class="hash-cell" title="password_hash">${x.password_hash.slice(0, 22)}…</span>
-                        <select class="ws-select" data-role-for="${x.user_id}">
-                            ${Auth.ROLES.map(r => `<option value="${r.role_id}"${r.role_id === x.role_id ? " selected" : ""}>${r.role_name}</option>`).join("")}
-                        </select>
-                        <button class="ws-link" data-save-role="${x.user_id}">Save</button>
-                    </div>`).join("")}
-            </div>`;
+            <h4>Users &amp; roles</h4>
+            <p class="ws-note">The server allowed this call: <code>GET /api/admin</code> responded 200.
+                The role inside the signed token — not anything in the browser — decided that.</p>
+            <pre class="ws-json">${JSON.stringify(guard.data, null, 2)}</pre>`;
         return;
     }
 
     if (tab === "audit") {
-        panel.innerHTML = `
-            <h4>Audit log <span class="ws-count">${Auth.AUDIT_LOG.length}</span></h4>
-            <p class="ws-note">Every login, logout, denied request and role change is recorded.</p>
-            <div class="ws-table">
-                ${Auth.AUDIT_LOG.map(l => `
-                    <div class="ws-row">
-                        <div><strong>${l.action}</strong><span class="ws-sub">${l.target}</span></div>
-                        <span class="ws-sub">user #${l.user_id ?? "guest"}</span>
-                        <span class="ws-sub">${l.at}</span>
-                    </div>`).join("")}
-            </div>`;
+        /* audit:read maps to the same admin-only endpoint. */
+        const guard = await Auth.requireAuth("audit:read")(SESSION?.token);
+        panel.innerHTML = guard.ok
+            ? `
+                <h4>Audit log</h4>
+                <p class="ws-note">HTTP 200 — <code>GET /api/admin</code> allowed for role <strong>${u.role}</strong>.</p>
+                <pre class="ws-json">${JSON.stringify(guard.data, null, 2)}</pre>`
+            : `
+                <h4>Audit log</h4>
+                <p class="ws-note">HTTP ${guard.status} — ${guard.error}</p>`;
         return;
     }
 
@@ -919,14 +918,16 @@ function renderWsPanel(tab) {
         <div class="sec-grid">
             <div class="sec-card">
                 <span class="sec-label">Password storage</span>
-                <code>${(Auth.USERS.find(x => x.user_id === u.user_id)?.password_hash || "").slice(0, 40)}…</code>
-                <p>PBKDF2-SHA256 · 120 000 iterations · unique random salt per user.</p>
+                <p>Hashed with <strong>bcrypt</strong> (10 salt rounds) on the server in
+                    <code>routes/auth.js</code>. The plain text never leaves the sign-in form
+                    and is never stored.</p>
             </div>
             <div class="sec-card">
                 <span class="sec-label">Session token (JWT, HS256)</span>
                 <code class="token-cell">${SESSION.token}</code>
-                <p>Signed payload: <code>sub</code>, <code>role</code>, <code>jti</code>, <code>exp</code>.
-                    Try editing it in localStorage — the signature check fails and you are logged out.</p>
+                <p>Signed by the server with <code>JWT_SECRET</code> and verified on every
+                    request by <code>middleware/auth.js</code>. Try editing it in
+                    localStorage — the signature check fails and the next call returns 403.</p>
             </div>
             <div class="sec-card">
                 <span class="sec-label">Permissions of my role</span>
@@ -987,46 +988,37 @@ document.getElementById("wsPanel").addEventListener("click", async e => {
         return;
     }
 
-    /* Protected: users:update:role */
+    /* Protected: users:update:role — the server re-checks the admin role. */
     const saveRole = e.target.closest("[data-save-role]");
     if (saveRole) {
-        const userId = Number(saveRole.dataset.saveRole);
         const guard = await Auth.requireAuth("users:update:role")(SESSION?.token);
         if (!guard.ok) return toast(`403 · ${guard.error}`);
-        const select = document.querySelector(`[data-role-for="${userId}"]`);
-        const target = Auth.findUserById(userId);
-        const before = Auth.roleNameOf(target);
-        target.role_id = Number(select.value);
-        Auth.AUDIT_LOG.unshift({
-            log_id: 0, user_id: guard.user.user_id, action: "users:update:role",
-            target: `${target.email}: ${before} → ${Auth.roleNameOf(target)}`,
-            at: new Date().toLocaleString("en-GB", { hour12: false })
-        });
-        toast(`${target.email} is now ${Auth.roleNameOf(target)}`);
-
-        /* If the admin demoted themselves, refresh their own token. */
-        if (target.user_id === SESSION.user.user_id) {
-            const me = await Auth.me(SESSION.token);
-            if (me.ok) applySession({ token: SESSION.token, user: me.user });
-        }
-        renderWorkspace();
+        /* The backend has no "change role" route yet, so the UI reports the
+           server's verdict instead of pretending the change was persisted. */
+        toast("The API allows this, but no role-update endpoint exists yet.");
+        return;
     }
 });
 
 /* ---- auth-related wiring ---- */
-document.getElementById("loginBtn").addEventListener("click", () => openAuth("login"));
-document.getElementById("closeAuth").addEventListener("click", closeAuth);
-authOverlay.addEventListener("click", e => { if (e.target === authOverlay) closeAuth(); });
-document.querySelectorAll("[data-auth-tab]").forEach(btn =>
-    btn.addEventListener("click", () => switchAuthTab(btn.dataset.authTab)));
+if (HAS_AUTH_UI) {
+    document.getElementById("loginBtn").addEventListener("click", () => openAuth("login"));
+    document.getElementById("closeAuth").addEventListener("click", closeAuth);
+    authOverlay.addEventListener("click", e => { if (e.target === authOverlay) closeAuth(); });
+    document.querySelectorAll("[data-auth-tab]").forEach(btn =>
+        btn.addEventListener("click", () => switchAuthTab(btn.dataset.authTab)));
+    document.getElementById("regPassword").addEventListener("input", e => updatePwRules(e.target.value));
+}
 
-document.getElementById("regPassword").addEventListener("input", e => updatePwRules(e.target.value));
-
-document.querySelectorAll(".demo-account").forEach(btn => btn.addEventListener("click", async () => {
-    /* Fast path: sign in directly, with no password hashing involved. This is
-       what makes "click a role and you're in" reliable on every browser. */
+/* ---- demo sign-in: click a role, the backend issues a real JWT ---- */
+/* The demo accounts now live in PostgreSQL. The password shown on each button
+   is the one the backend stored, so this performs a genuine login. */
+if (HAS_AUTH_UI) document.querySelectorAll(".demo-account").forEach(btn => btn.addEventListener("click", async () => {
     try {
-        const res = await Auth.loginAsRole(btn.dataset.role);
+        const res = await Auth.login({
+            email: btn.dataset.email,
+            password: btn.dataset.password
+        });
         if (!res.ok) {
             authError(res.error || "Could not sign in.");
             toast("Sign-in failed — see the message above");
@@ -1071,21 +1063,19 @@ document.getElementById("gateRegisterBtn").addEventListener("click", () => openA
    DEMO PLAYGROUND
    --------------------------------------------------------------------------
    Defined BEFORE initAuth() so it exists the moment the page loads. Everything
-   here goes through Auth.loginAsRole(), which needs no password hashing — so
-   these helpers work immediately, even while seeding is still running.
+   here goes through the real API, so the 403/200 below come from the server.
    -------------------------------------------------------------------------- */
 const DEMO_PASSWORDS = { user: "User1234", manager: "Manager1234", admin: "Admin1234" };
-
-/* Resolves once the demo accounts have their password hashes. Only the typed
-   password form depends on this; the role buttons never do. */
-const ready = Auth.seeded;
 
 window.DEMO = {
     /* Sign in as a role on the console, then call a permission-guarded endpoint:
            await DEMO.api('user',  'users:read')   -> 403 Forbidden
            await DEMO.api('admin', 'users:read')   -> 200 OK            */
     api: async (role, permission) => {
-        const login = await Auth.loginAsRole(role);
+        const account = Auth.SEED_ACCOUNTS.find(a => a.role === role);
+        if (!account) return { ok: false, status: 404, error: `No demo account with role "${role}".` };
+
+        const login = await Auth.login({ email: account.email, password: account.password });
         if (!login.ok) return login;
 
         const result = await Auth.requireAuth(permission)(login.token);
@@ -1096,50 +1086,49 @@ window.DEMO = {
     /* Sign in as a role from the console (also what the modal buttons use):
            await DEMO.login('manager')                                        */
     login: async role => {
-        const res = await Auth.loginAsRole(role);
+        const account = Auth.SEED_ACCOUNTS.find(a => a.role === role);
+        if (!account) return { ok: false, status: 404, error: `No demo account with role "${role}".` };
+        const res = await Auth.login({ email: account.email, password: account.password });
         if (res.ok) applySession({ token: res.token, user: res.user, session_id: res.session_id });
         return res;
     },
 
-    /* All seeded accounts, so you can see the email/password pair for each role. */
-    accounts: () => Auth.USERS.map(u => ({
-        email: u.email,
-        role: Auth.roleNameOf(u),
-        password: DEMO_PASSWORDS[Auth.roleNameOf(u)],
-        password_hash_ready: !!u.password_hash
-    })),
+    /* The demo accounts the UI offers. The rows themselves live in PostgreSQL. */
+    accounts: () => Auth.SEED_ACCOUNTS.map(a => ({ email: a.email, role: a.role, password: a.password })),
 
     logout: () => logout(),
-    session: () => SESSION,
-    users: () => Auth.USERS.map(Auth.publicUser),
-    audit: () => Auth.AUDIT_LOG
+    session: () => SESSION
 };
 
 /* --------------------------------------------------------------------------
    DIAGNOSTICS
    --------------------------------------------------------------------------
    If sign-in ever "does nothing", run `checkAuth()` in the browser console. It
-   reports exactly which prerequisite is missing (secure context / seed accounts /
-   crypto.subtle) instead of failing silently.
+   pings the API and reports exactly which prerequisite is missing.
    -------------------------------------------------------------------------- */
-function checkAuth() {
+async function checkAuth() {
     const report = {
         page: location.href,
-        secureContext: window.isSecureContext,
-        hasWebCrypto: typeof crypto !== "undefined" && !!crypto.subtle,
-        hasAuthObject: typeof Auth !== "undefined",
-        seededAccounts: typeof Auth !== "undefined" ? Auth.USERS.length : 0,
-        seededEmails: typeof Auth !== "undefined" ? Auth.USERS.map(u => u.email) : [],
+        apiBase: Auth.API_BASE,
         loggedIn: SESSION ? SESSION.user.email : null,
-        canLogin: null
+        apiReachable: null,
+        problem: null
     };
-    if (!report.hasWebCrypto) {
-        report.problem = "crypto.subtle is missing — Web Crypto needs https://, localhost or file://";
-    } else if (report.seededAccounts === 0) {
-        report.problem = "no accounts seeded — seeding failed or is still running; reload the page";
-    } else {
-        report.canLogin = "accounts are seeded — the demo buttons should work";
+
+    try {
+        const res = await fetch(Auth.API_BASE + "/");
+        report.apiReachable = res.ok;
+    } catch {
+        report.apiReachable = false;
     }
+
+    if (!report.apiReachable) {
+        report.problem = `The API at ${Auth.API_BASE} is not answering. Start it with: ` +
+            `cd backend/backend && npm start`;
+    } else {
+        report.problem = "none — the API is reachable, sign-in should work";
+    }
+
     console.table(report);
     return report;
 }
