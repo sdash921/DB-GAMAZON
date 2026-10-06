@@ -1,3 +1,4 @@
+console.log("NEW AUTH JS LOADED - 2026");
 const API_BASE = "http://localhost:3000";
 
 const ROLES = [
