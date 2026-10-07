@@ -753,6 +753,7 @@ if (HAS_AUTH_UI) registerForm.addEventListener("submit", async e => {
     e.preventDefault();
     const res = await Auth.register({
         name: document.getElementById("regName").value,
+        phone: document.getElementById("regPhone").value,
         email: document.getElementById("regEmail").value,
         password: document.getElementById("regPassword").value
     });
