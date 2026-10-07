@@ -9,13 +9,7 @@ const router = express.Router();
 
 router.post("/register", async (req, res) => {
     const { first_name, last_name, phone, email, password } = req.body;
-    console.log("REGISTER DATA:", {
-        first_name,
-        last_name,
-        phone,
-        email,
-        password
-    });
+    
     try {
         // 1. Проверяем, есть ли такой email
         const existingUser = await pool.query(
