@@ -816,6 +816,7 @@ function workspaceTabs(role) {
 }
 
 let activeWsTab = null;
+let workspaceRequestId = 0;
 
 const ordersState = {
     page: 1,
@@ -1010,6 +1011,7 @@ async function renderDatabaseOrders(tab) {
 function renderWorkspace() {
     const locked = document.getElementById("wsLocked");
     const signed = document.getElementById("wsSignedIn");
+    const requestId = ++workspaceRequestId;
 
     if (!SESSION) {
         locked.hidden = false;
@@ -1033,8 +1035,8 @@ function renderWorkspace() {
         `<button class="ws-tab${t.id === activeWsTab ? " active" : ""}" data-ws-tab="${t.id}">${t.label}</button>`
     ).join("");
 
-    renderWsPanel(activeWsTab);
     renderMatrix();
+    renderWsPanel(activeWsTab);
 }
 
 async function renderWsPanel(tab) {
