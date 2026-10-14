@@ -817,6 +817,196 @@ function workspaceTabs(role) {
 
 let activeWsTab = null;
 
+const ordersState = {
+    page: 1,
+    limit: 5,
+    sort: "order_date",
+    order: "desc",
+    status: "",
+    search: ""
+};
+
+async function fetchOrders() {
+    const params = new URLSearchParams({
+        page: ordersState.page,
+        limit: ordersState.limit,
+        sort: ordersState.sort,
+        order: ordersState.order
+    });
+
+    if (ordersState.status) {
+        params.set("status", ordersState.status);
+    }
+
+    if (ordersState.search) {
+        params.set("search", ordersState.search);
+    }
+
+    const response = await fetch(
+        `${Auth.API_BASE}/api/orders?${params}`,
+        {
+            headers: {
+                Authorization: `Bearer ${SESSION.token}`
+            }
+        }
+    );
+
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.json();
+}
+
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    })[c]);
+}
+
+async function renderDatabaseOrders(tab) {
+    const panel = document.getElementById("wsPanel");
+    const token = SESSION?.token;
+
+    panel.innerHTML = "<p>Loading orders...</p>";
+
+    try {
+        const data = await fetchOrders();
+
+        // Prevent outdated responses after switching tabs/logout
+        if (SESSION?.token !== token || activeWsTab !== tab) {
+            return;
+        }
+
+        panel.innerHTML = `
+            <h4>${tab === "my-orders" ? "My orders" : "All orders"}
+                <span class="ws-count">${data.total}</span>
+            </h4>
+
+            <div class="ws-filters">
+                <select id="ordersStatus">
+                    <option value="">All statuses</option>
+                    <option value="Created">Created</option>
+                    <option value="In Transit">In Transit</option>
+                    <option value="Delivered">Delivered</option>
+                    <option value="Cancelled">Cancelled</option>
+                </select>
+
+                <select id="ordersSort">
+                    <option value="order_date">Date</option>
+                    <option value="total_cost">Price</option>
+                    <option value="order_id">Order ID</option>
+                </select>
+
+                <select id="ordersDirection">
+                    <option value="desc">Descending</option>
+                    <option value="asc">Ascending</option>
+                </select>
+
+                <input id="ordersSearch"
+                    placeholder="Order ID or tracking number">
+
+                <button id="ordersSearchBtn" class="ws-link">
+                    Search
+                </button>
+            </div>
+
+            <div class="ws-table">
+                ${data.orders.map(o => `
+                    <div class="ws-row">
+                        <div>
+                            <strong>Order #${o.order_id}</strong>
+                            <span class="ws-sub">
+                                ${new Date(o.order_date).toLocaleDateString()}
+                            </span>
+                        </div>
+
+                        <span class="ws-amount">
+                            ${Number(o.total_cost ?? 0).toFixed(2)} ₸
+                        </span>
+
+                        <span class="status-pill"
+                            data-status="${escapeHtml(o.status)}">
+                            ${escapeHtml(o.status)}
+                        </span>
+                    </div>
+                `).join("") || '<p class="ws-empty">No orders found.</p>'}
+            </div>
+
+            <div class="ws-pagination">
+                <button id="ordersPrev" class="ws-link"
+                    ${data.page <= 1 ? "disabled" : ""}>
+                    Previous
+                </button>
+
+                <span>Page ${data.page} of ${data.totalPages || 1}</span>
+
+                <button id="ordersNext" class="ws-link"
+                    ${data.page >= data.totalPages ? "disabled" : ""}>
+                    Next
+                </button>
+            </div>
+        `;
+
+        document.getElementById("ordersStatus").value = ordersState.status;
+        document.getElementById("ordersSort").value = ordersState.sort;
+        document.getElementById("ordersDirection").value = ordersState.order;
+        document.getElementById("ordersSearch").value = ordersState.search;
+
+        function reload() {
+            ordersState.page = 1;
+            renderDatabaseOrders(tab);
+        }
+
+        document.getElementById("ordersStatus").onchange = e => {
+            ordersState.status = e.target.value;
+            reload();
+        };
+
+        document.getElementById("ordersSort").onchange = e => {
+            ordersState.sort = e.target.value;
+            reload();
+        };
+
+        document.getElementById("ordersDirection").onchange = e => {
+            ordersState.order = e.target.value;
+            reload();
+        };
+
+        document.getElementById("ordersSearchBtn").onclick = () => {
+            ordersState.search =
+                document.getElementById("ordersSearch").value.trim();
+            reload();
+        };
+
+        document.getElementById("ordersSearch").onkeydown = e => {
+            if (e.key === "Enter") {
+                document.getElementById("ordersSearchBtn").click();
+            }
+        };
+
+        document.getElementById("ordersPrev").onclick = () => {
+            ordersState.page--;
+            renderDatabaseOrders(tab);
+        };
+
+        document.getElementById("ordersNext").onclick = () => {
+            ordersState.page++;
+            renderDatabaseOrders(tab);
+        };
+
+    } catch (error) {
+        if (SESSION?.token === token && activeWsTab === tab) {
+            panel.textContent = "Failed to load orders: " + error.message;
+        }
+        console.error(error);
+    }
+}
+
 function renderWorkspace() {
     const locked = document.getElementById("wsLocked");
     const signed = document.getElementById("wsSignedIn");
@@ -850,23 +1040,8 @@ function renderWorkspace() {
 async function renderWsPanel(tab) {
     const panel = document.getElementById("wsPanel");
     const u = SESSION.user;
-    const myOrders = getOrdersByCustomer(u.customer_id);
 
-    if (tab === "my-orders") {
-        panel.innerHTML = `
-            <h4>My orders <span class="ws-count">${myOrders.length}</span></h4>
-            <p class="ws-note">SELECT * FROM orders WHERE customer_id = ${u.customer_id ?? "—"}</p>
-            ${wsOrderRows(myOrders, o => `<button class="ws-link" data-track="${o.order_id}">Track</button>`)}`;
-        return;
-    }
-
-    if (tab === "all-orders") {
-        panel.innerHTML = `
-            <h4>All orders <span class="ws-count">${ORDERS.length}</span></h4>
-            <p class="ws-note">SELECT o.*, c.name FROM orders o JOIN customers c ON c.customer_id = o.customer_id</p>
-            ${wsOrderRows(ORDERS, o => `<button class="ws-link" data-track="${o.order_id}">Track</button>`)}`;
-        return;
-    }
+    
 
     if (tab === "fulfil") {
         panel.innerHTML = `
