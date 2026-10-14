@@ -1821,3 +1821,33 @@ img {
         flex: 1;
     }
 }
+
+
+.ws-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 18px 0;
+}
+
+.ws-filters select,
+.ws-filters input {
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    font: inherit;
+}
+
+.ws-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.ws-pagination button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
