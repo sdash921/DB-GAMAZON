@@ -1041,7 +1041,10 @@ async function renderWsPanel(tab) {
     const panel = document.getElementById("wsPanel");
     const u = SESSION.user;
 
-    
+    if (tab === "my-orders" || tab === "all-orders") {
+    await renderDatabaseOrders(tab);
+    return;
+    }
 
     if (tab === "fulfil") {
         panel.innerHTML = `
