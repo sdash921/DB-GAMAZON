@@ -23,9 +23,11 @@
             </a>
 
             <nav class="nav-links">
-                <a href="#create-delivery">Create delivery</a>
-                <a href="#track">Track parcel</a>
-                <a href="#workspace">Workspace</a>
+                <a href="#shop">Shop</a>
+                <a href="#shop" data-cat="Electronics">Electronics</a>
+                <a href="#shop" data-cat="Home">Home</a>
+                <a href="#shop" data-cat="Fashion">Fashion</a>
+                <a href="#track">Track order</a>
             </nav>
 
             <div class="nav-actions">
@@ -54,6 +56,10 @@
                     </div>
                 </div>
 
+                <button class="cart-btn" id="openCart" aria-label="Open cart">
+                    <span class="cart-icon">🛒</span>
+                    <span class="cart-count" id="cartCount">0</span>
+                </button>
             </div>
         </div>
     </header>
@@ -61,131 +67,69 @@
     <!-- ============ HERO ============ -->
     <section class="hero">
         <div class="hero-inner">
-            <p class="eyebrow">GAmazon Logistics Platform</p>
-            <h1>Move parcels. <span class="accent">Deliver trust.</span></h1>
+            <p class="eyebrow">Logistics &amp; Delivery System</p>
+            <h1>Shop it. Route it. <span class="accent">Deliver</span> it.</h1>
             <p class="hero-lead">
-                A delivery management platform connecting customers,
-                drivers and logistics managers. Create a delivery request,
-                choose an available route and track your parcel.
+                GAmazon is a logistics and delivery platform. Browse the store, place an
+                order, and follow your parcel through every stage — from the depot to the
+                hands of your driver and finally to your door.
             </p>
             <div class="hero-actions">
-                <a href="#create-delivery" class="btn btn-primary">Create delivery</a>
-                <a href="#track" class="btn btn-ghost">Track parcel</a>
+                <a href="#shop" class="btn btn-primary">Start shopping</a>
+                <a href="#track" class="btn btn-ghost">Track my order</a>
             </div>
         </div>
     </section>
 
     <!-- ============ SHOP ============ -->
-    <section class="section" id="create-delivery">
-        <div class="section-head">
-            <h2>Create a delivery request</h2>
-            <p>Enter parcel details and choose where it should be delivered.</p>
-        </div>
-
-        <div class="delivery-card">
-            <form id="deliveryForm" class="form">
-                <h3>Pickup address</h3>
-
-                <label>City
-                    <input id="pickupCity" type="text" placeholder="Almaty" required>
-                </label>
-
-                <label>Street
-                    <input id="pickupStreet" type="text" placeholder="Abay street" required>
-                </label>
-
-                <label>Building
-                    <input id="pickupBuilding" type="text" placeholder="10" required>
-                </label>
-
-                <label>Apartment (optional)
-                    <input id="pickupApartment" type="text" placeholder="25">
-                </label>
-
-                <h3>Delivery address</h3>
-
-                <label>City
-                    <input id="deliveryCity" type="text" placeholder="Astana" required>
-                </label>
-
-                <label>Street
-                    <input id="deliveryStreet" type="text" placeholder="Mangilik El" required>
-                </label>
-
-                <label>Building
-                    <input id="deliveryBuilding" type="text" placeholder="15" required>
-                </label>
-
-                <label>Apartment (optional)
-                    <input id="deliveryApartment" type="text" placeholder="12">
-                </label>
-
-                <h3>Parcel details</h3>
-
-                <div class="form-grid">
-                    <label>Weight (kg)
-                        <input id="parcelWeight" type="number" min="0.1" step="0.1" placeholder="5" required>
-                    </label>
-
-                    <label>Length (cm)
-                        <input id="parcelLength" type="number" min="1" placeholder="30" required>
-                    </label>
-
-                    <label>Width (cm)
-                        <input id="parcelWidth" type="number" min="1" placeholder="20" required>
-                    </label>
-
-                    <label>Height (cm)
-                        <input id="parcelHeight" type="number" min="1" placeholder="15" required>
-                    </label>
+    <section class="section" id="shop">
+        <div class="section-head shop-head">
+            <h2>Today's picks</h2>
+            <div class="shop-tools">
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="search" id="searchInput" placeholder="Search GAmazon…" aria-label="Search products">
                 </div>
-
-                <label>Delivery type
-                    <select id="deliveryType" required>
-                        <option value="Standard">Standard</option>
-                        <option value="Express">Express</option>
-                    </select>
-                </label>
-
-                <label>Requested delivery date
-                    <input id="requestedDate" type="date" required>
-                </label>
-
-                <button class="btn btn-primary btn-full" type="submit">
-                    Find available routes
-                </button>
-            </form>
-
-            <div id="deliveryMessage" class="delivery-message" hidden></div>
-            <div id="routeOptions" class="route-options"></div>
+                <div class="chips" id="categoryChips">
+                    <!-- filled by JS -->
+                </div>
+            </div>
         </div>
+
+        <div class="product-grid" id="productGrid">
+            <!-- filled by JS -->
+        </div>
+
+        <p class="empty-msg" id="emptyMsg" hidden>No products match your search. Try another keyword.</p>
     </section>
 
     <!-- ============ TRACK ORDER ============ -->
     <section class="section section-alt" id="track">
         <div class="section-head">
-            <h2>Track your parcel</h2>
-            <p>Enter your tracking number to view the parcel's delivery history.</p>
+            <h2>Track your order</h2>
+            <p>Enter your order number and we'll show you exactly where your parcel is.</p>
         </div>
 
         <div class="tracker">
             <div class="tracker-form">
-                <label for="orderInput">Tracking number</label>
+                <label for="orderInput">Order number</label>
                 <div class="tracker-row">
-                    <input type="text" id="orderInput"
-                        placeholder="e.g. GADC7650F73C89"
-                        aria-label="Tracking number">
+                    <input type="text" id="orderInput" placeholder="e.g. GA-104832" aria-label="Order number">
                     <button id="trackBtn" class="btn btn-primary">Track</button>
                 </div>
-
                 <p class="tracker-hint" id="trackerHint">
-                    Enter the tracking number received after confirming your delivery.
+                    Tip: try <button class="linky" data-demo="GA-104832">GA-104832</button> or
+                    <button class="linky" data-demo="GA-104840">GA-104840</button>.
                 </p>
 
-                <div class="order-meta" id="orderMeta"></div>
+                <div class="order-meta" id="orderMeta">
+                    <!-- filled by JS -->
+                </div>
             </div>
 
-            <div class="timeline" id="timeline" aria-live="polite"></div>
+            <div class="timeline" id="timeline" aria-live="polite">
+                <!-- filled by JS -->
+            </div>
         </div>
     </section>
 
