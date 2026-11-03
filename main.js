@@ -519,20 +519,62 @@ function showTrackingPlaceholder(message) {
     timelineEl.innerHTML = `<div class="tl-empty">${message}</div>`;
 }
 
-function trackOrder() {
-    const id = orderInput.value.trim();
-    if (!id) {
-        toast("Please enter an order number");
+async function trackOrder() {
+    const trackingNumber = orderInput.value.trim();
+
+    if (!trackingNumber) {
+        toast("Please enter a tracking number");
         return;
     }
-    const result = getOrder(id);
-    if (!result) {
+
+    try {
         metaEl.innerHTML = "";
-        showTrackingPlaceholder(`We couldn't find order <strong>${id}</strong>.<br>Check the number and try again.`);
-        return;
+        showTrackingPlaceholder("Loading parcel information...");
+
+        const data = await logisticsRequest(
+            `/api/tracking/${encodeURIComponent(trackingNumber)}`
+        );
+
+        const parcel = data.parcel;
+        const order = data.order;
+        const history = data.history || [];
+
+        metaEl.innerHTML = `
+            <div class="meta-row">
+                <span>Tracking number</span>
+                <span>${parcel.tracking_number}</span>
+            </div>
+            <div class="meta-row">
+                <span>Order ID</span>
+                <span>#${order.order_id}</span>
+            </div>
+            <div class="meta-row">
+                <span>Weight</span>
+                <span>${parcel.weight_kg} kg</span>
+            </div>
+            <div class="meta-row">
+                <span>Current status</span>
+                <span>${data.current_status || order.status}</span>
+            </div>
+            <div class="meta-row">
+                <span>Current city</span>
+                <span>${data.current_city || "Not specified"}</span>
+            </div>
+        `;
+
+        renderTimeline(history.map(item => ({
+            title: item.status,
+            time: new Date(item.timestamp).toLocaleString(),
+            desc: item.city
+                ? `Location: ${item.city}`
+                : "Parcel status updated."
+        })));
+
+    } catch (error) {
+        console.error("Tracking error:", error);
+        metaEl.innerHTML = "";
+        showTrackingPlaceholder(error.message);
     }
-    renderMeta(result);
-    renderTimeline(result.events);
 }
 
 /* --------------------------------------------------------------------------
@@ -1350,3 +1392,211 @@ document.getElementById("year").textContent = new Date().getFullYear();
         "\n      await DEMO.api('admin','users:read')  -> 200" +
         "\n      await DEMO.login('manager')  |  DEMO.users()  |  DEMO.audit()");
 })();
+
+
+
+
+
+
+/* ==========================================================================
+   LOGISTICS — DELIVERY REQUESTS
+   ========================================================================== */
+
+let currentDeliveryRequestId = null;
+
+const deliveryForm = document.getElementById("deliveryForm");
+const deliveryMessage = document.getElementById("deliveryMessage");
+const routeOptions = document.getElementById("routeOptions");
+
+const requestedDateInput = document.getElementById("requestedDate");
+
+if (requestedDateInput) {
+    requestedDateInput.min = new Date().toISOString().slice(0, 10);
+}
+
+
+function showDeliveryMessage(message, isError = false) {
+    deliveryMessage.hidden = false;
+    deliveryMessage.textContent = message;
+    deliveryMessage.style.color = isError ? "#dc2626" : "#16a34a";
+}
+
+function getDeliveryFormData() {
+    return {
+        pickup_address: {
+            city: document.getElementById("pickupCity").value.trim(),
+            street: document.getElementById("pickupStreet").value.trim(),
+            building: document.getElementById("pickupBuilding").value.trim(),
+            apartment: document.getElementById("pickupApartment").value.trim()
+        },
+        delivery_address: {
+            city: document.getElementById("deliveryCity").value.trim(),
+            street: document.getElementById("deliveryStreet").value.trim(),
+            building: document.getElementById("deliveryBuilding").value.trim(),
+            apartment: document.getElementById("deliveryApartment").value.trim()
+        },
+        weight_kg: Number(document.getElementById("parcelWeight").value),
+        length_cm: Number(document.getElementById("parcelLength").value),
+        width_cm: Number(document.getElementById("parcelWidth").value),
+        height_cm: Number(document.getElementById("parcelHeight").value),
+        delivery_type: document.getElementById("deliveryType").value,
+        requested_date: document.getElementById("requestedDate").value
+    };
+}
+
+async function logisticsRequest(path, method = "GET", body = null) {
+    if (!SESSION?.token) {
+        throw new Error("Please sign in to create a delivery.");
+    }
+
+    const response = await fetch(`${Auth.API_BASE}${path}`, {
+        method,
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${SESSION.token}`
+        },
+        ...(body ? { body: JSON.stringify(body) } : {})
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        throw new Error(data.error || data.message || `Request failed: HTTP ${response.status}`);
+    }
+
+    return data;
+}
+
+function renderRouteOptions(options) {
+    routeOptions.innerHTML = "";
+
+    if (!options.length) {
+        routeOptions.innerHTML = `
+            <div class="route-card">
+                <h3>No available routes</h3>
+                <p>There are currently no routes matching your delivery request.</p>
+            </div>`;
+        return;
+    }
+
+    options.forEach(option => {
+        const card = document.createElement("article");
+        card.className = "route-card";
+
+        const routeId = option.route_id;
+
+        card.innerHTML = `
+            <h3>Route #${routeId}</h3>
+            <p><strong>From:</strong> ${option.pickup_city || "Pickup depot"}</p>
+            <p><strong>To:</strong> ${option.delivery_city || "Delivery depot"}</p>
+            <p><strong>Driver:</strong> ${option.driver_name || "Assigned driver"}</p>
+            <p><strong>Vehicle:</strong> ${option.vehicle_type || "Available vehicle"}</p>
+            <p><strong>Distance:</strong> ${option.distance_km ?? "—"} km</p>
+            <button class="btn btn-primary" type="button" data-confirm-route="${routeId}">
+                Confirm this route
+            </button>
+        `;
+
+        routeOptions.appendChild(card);
+    });
+}
+
+deliveryForm.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    try {
+        if (!SESSION?.token) {
+            showDeliveryMessage("Please sign in before creating a delivery.", true);
+            openAuth("login");
+            return;
+        }
+
+        const guard = await Auth.requireAuth("orders:create")(SESSION.token);
+
+        if (!guard.ok) {
+            showDeliveryMessage(guard.error || "You are not allowed to create a delivery.", true);
+            return;
+        }
+
+        showDeliveryMessage("Creating your delivery request...");
+        routeOptions.innerHTML = "";
+
+        const request = await logisticsRequest(
+            "/api/delivery-requests",
+            "POST",
+            getDeliveryFormData()
+        );
+
+        currentDeliveryRequestId = request.request_id;
+
+        showDeliveryMessage(
+            `Delivery request #${currentDeliveryRequestId} created. Searching for available routes...`
+        );
+
+        const result = await logisticsRequest(
+            `/api/delivery-requests/${currentDeliveryRequestId}/options`
+        );
+
+        renderRouteOptions(result.options || []);
+
+        showDeliveryMessage(
+            `Request #${currentDeliveryRequestId}: found ${result.options_count ?? (result.options || []).length} route option(s).`
+        );
+
+    } catch (error) {
+        console.error("Delivery request error:", error);
+        showDeliveryMessage(error.message, true);
+    }
+});
+
+routeOptions.addEventListener("click", async event => {
+    const button = event.target.closest("[data-confirm-route]");
+    if (!button) return;
+
+    const routeId = Number(button.dataset.confirmRoute);
+
+    if (!currentDeliveryRequestId || !routeId) {
+        showDeliveryMessage("Missing delivery request or route ID.", true);
+        return;
+    }
+
+    try {
+        button.disabled = true;
+        button.textContent = "Confirming...";
+
+        const result = await logisticsRequest(
+            `/api/delivery-requests/${currentDeliveryRequestId}/confirm`,
+            "POST",
+            { route_id: routeId }
+        );
+
+        showDeliveryMessage(
+            `Delivery confirmed! Order #${result.order_id}. Tracking number: ${result.tracking_number}`
+        );
+
+        routeOptions.innerHTML = `
+            <div class="route-card">
+                <h3>Delivery confirmed!</h3>
+                <p><strong>Order:</strong> #${result.order_id}</p>
+                <p><strong>Tracking number:</strong> ${result.tracking_number}</p>
+                <button class="btn btn-primary" id="trackNewParcel" type="button">
+                    Track parcel
+                </button>
+            </div>
+        `;
+
+        document.getElementById("trackNewParcel").addEventListener("click", () => {
+            document.getElementById("orderInput").value = result.tracking_number;
+            document.getElementById("track").scrollIntoView({ behavior: "smooth" });
+            trackOrder();
+        });
+
+        renderWorkspace();
+
+    } catch (error) {
+        console.error("Route confirmation error:", error);
+        showDeliveryMessage(error.message, true);
+        button.disabled = false;
+        button.textContent = "Confirm this route";
+    }
+});
