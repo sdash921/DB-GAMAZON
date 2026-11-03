@@ -486,33 +486,46 @@ function renderMeta({ order, customer, items }) {
 }
 
 function renderTimeline(events) {
-    const reached = events.length;
     timelineEl.classList.remove("has-empty");
     timelineEl.innerHTML = "";
 
+    if (!events || events.length === 0) {
+        showTrackingPlaceholder("No tracking history yet.");
+        return;
+    }
+
+    const statusDescriptions = {
+        "Created": "The parcel has been registered.",
+        "In Transit": "The parcel is on its way.",
+        "At Depot": "The parcel has arrived at a depot.",
+        "Delivered": "The parcel has been delivered.",
+        "Cancelled": "The delivery has been cancelled."
+    };
+
     events.forEach((ev, i) => {
-        const isLast = i === reached - 1;
+        const isLast = i === events.length - 1;
         const state = isLast ? "active" : "done";
+
+        const date = ev.timestamp
+            ? new Date(ev.timestamp).toLocaleString()
+            : "Time unavailable";
+
+        const description =
+            statusDescriptions[ev.status] || "Parcel status updated.";
+
         timelineEl.insertAdjacentHTML("beforeend", `
             <div class="tl-item ${state}" style="animation-delay:${i * 70}ms">
-                <div class="tl-title">${ev.title}</div>
-                <div class="tl-time">${ev.time}</div>
-                <div class="tl-desc">${ev.desc}</div>
+                <div class="tl-title">${ev.status}</div>
+                <div class="tl-time">${date}</div>
+                <div class="tl-desc">
+                    ${ev.city ? `Location: ${ev.city}. ` : ""}
+                    ${description}
+                </div>
             </div>
         `);
     });
-
-    const remaining = LIFECYCLE.length - reached;
-    for (let i = 0; i < remaining; i++) {
-        timelineEl.insertAdjacentHTML("beforeend", `
-            <div class="tl-item pending">
-                <div class="tl-title">${LIFECYCLE[reached + i]}</div>
-                <div class="tl-time">pending</div>
-                <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
-            </div>
-        `);
-    }
 }
+
 
 function showTrackingPlaceholder(message) {
     timelineEl.classList.add("has-empty");
@@ -523,14 +536,11 @@ async function trackOrder() {
     const trackingNumber = orderInput.value.trim();
 
     if (!trackingNumber) {
-        toast("Please enter a tracking number");
+        showTrackingPlaceholder("Enter your tracking number.");
         return;
     }
 
     try {
-        metaEl.innerHTML = "";
-        showTrackingPlaceholder("Loading parcel information...");
-
         const data = await logisticsRequest(
             `/api/tracking/${encodeURIComponent(trackingNumber)}`
         );
@@ -540,43 +550,17 @@ async function trackOrder() {
         const history = data.history || [];
 
         metaEl.innerHTML = `
-            <div class="meta-row">
-                <span>Tracking number</span>
-                <span>${parcel.tracking_number}</span>
-            </div>
-            <div class="meta-row">
-                <span>Order ID</span>
-                <span>#${order.order_id}</span>
-            </div>
-            <div class="meta-row">
-                <span>Weight</span>
-                <span>${parcel.weight_kg} kg</span>
-            </div>
-            <div class="meta-row">
-                <span>Current status</span>
-                <span>${data.current_status || order.status}</span>
-            </div>
-            <div class="meta-row">
-                <span>Current city</span>
-                <span>${data.current_city || "Not specified"}</span>
-            </div>
+            <strong>Tracking number:</strong> ${parcel.tracking_number}<br>
+            <strong>Order:</strong> #${order.order_id}<br>
+            <strong>Status:</strong> ${data.current_status || order.status}<br>
+            <strong>Current city:</strong> ${data.current_city || "Unknown"}
         `;
 
-        renderTimeline(history.map(item => ({
-            title: item.status,
-            time: new Date(item.timestamp).toLocaleString(),
-            desc: item.city
-                ? `Location: ${item.city}`
-                : "Parcel status updated."
-        })));
-
+        renderTimeline(history);
     } catch (error) {
-        console.error("Tracking error:", error);
-        metaEl.innerHTML = "";
         showTrackingPlaceholder(error.message);
     }
 }
-
 /* --------------------------------------------------------------------------
    UI — WIRING
    -------------------------------------------------------------------------- */
