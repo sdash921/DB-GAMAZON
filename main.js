@@ -486,143 +486,106 @@ function renderMeta({ order, customer, items }) {
 }
 
 function renderTimeline(events) {
+    const reached = events.length;
     timelineEl.classList.remove("has-empty");
     timelineEl.innerHTML = "";
 
-    if (!events || events.length === 0) {
-        showTrackingPlaceholder("No tracking history yet.");
-        return;
-    }
-
-    const statusDescriptions = {
-        "Created": "The parcel has been registered.",
-        "In Transit": "The parcel is on its way.",
-        "At Depot": "The parcel has arrived at a depot.",
-        "Delivered": "The parcel has been delivered.",
-        "Cancelled": "The delivery has been cancelled."
-    };
-
     events.forEach((ev, i) => {
-        const isLast = i === events.length - 1;
+        const isLast = i === reached - 1;
         const state = isLast ? "active" : "done";
-
-        const date = ev.timestamp
-            ? new Date(ev.timestamp).toLocaleString()
-            : "Time unavailable";
-
-        const description =
-            statusDescriptions[ev.status] || "Parcel status updated.";
-
         timelineEl.insertAdjacentHTML("beforeend", `
             <div class="tl-item ${state}" style="animation-delay:${i * 70}ms">
-                <div class="tl-title">${ev.status}</div>
-                <div class="tl-time">${date}</div>
-                <div class="tl-desc">
-                    ${ev.city ? `Location: ${ev.city}. ` : ""}
-                    ${description}
-                </div>
+                <div class="tl-title">${ev.title}</div>
+                <div class="tl-time">${ev.time}</div>
+                <div class="tl-desc">${ev.desc}</div>
             </div>
         `);
     });
-}
 
+    const remaining = LIFECYCLE.length - reached;
+    for (let i = 0; i < remaining; i++) {
+        timelineEl.insertAdjacentHTML("beforeend", `
+            <div class="tl-item pending">
+                <div class="tl-title">${LIFECYCLE[reached + i]}</div>
+                <div class="tl-time">pending</div>
+                <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
+            </div>
+        `);
+    }
+}
 
 function showTrackingPlaceholder(message) {
     timelineEl.classList.add("has-empty");
     timelineEl.innerHTML = `<div class="tl-empty">${message}</div>`;
 }
 
-async function trackOrder() {
-    const trackingNumber = orderInput.value.trim();
-
-    if (!trackingNumber) {
-        showTrackingPlaceholder("Enter your tracking number.");
+function trackOrder() {
+    const id = orderInput.value.trim();
+    if (!id) {
+        toast("Please enter an order number");
         return;
     }
-
-    try {
-        const data = await logisticsRequest(
-            `/api/tracking/${encodeURIComponent(trackingNumber)}`
-        );
-
-        const parcel = data.parcel;
-        const order = data.order;
-        const history = data.history || [];
-
-        metaEl.innerHTML = `
-            <strong>Tracking number:</strong> ${parcel.tracking_number}<br>
-            <strong>Order:</strong> #${order.order_id}<br>
-            <strong>Status:</strong> ${data.current_status || order.status}<br>
-            <strong>Current city:</strong> ${data.current_city || "Unknown"}
-        `;
-
-        renderTimeline(history);
-    } catch (error) {
-        showTrackingPlaceholder(error.message);
+    const result = getOrder(id);
+    if (!result) {
+        metaEl.innerHTML = "";
+        showTrackingPlaceholder(`We couldn't find order <strong>${id}</strong>.<br>Check the number and try again.`);
+        return;
     }
+    renderMeta(result);
+    renderTimeline(result.events);
 }
+
 /* --------------------------------------------------------------------------
    UI — WIRING
    -------------------------------------------------------------------------- */
-
-// Старые элементы магазина — подключаем только если они существуют
-const openCartBtn = document.getElementById("openCart");
-const closeCartBtn = document.getElementById("closeCart");
-const closeCheckoutBtn = document.getElementById("closeCheckout");
-
-if (openCartBtn) openCartBtn.addEventListener("click", openCart);
-if (closeCartBtn) closeCartBtn.addEventListener("click", closeCart);
-if (drawerOverlay) drawerOverlay.addEventListener("click", closeCart);
-if (checkoutBtn) checkoutBtn.addEventListener("click", openCheckout);
-if (closeCheckoutBtn) closeCheckoutBtn.addEventListener("click", closeCheckout);
-
-if (checkoutOverlay) {
-    checkoutOverlay.addEventListener("click", e => {
-        if (e.target === checkoutOverlay) closeCheckout();
-    });
-}
-
+document.getElementById("openCart").addEventListener("click", openCart);
+document.getElementById("closeCart").addEventListener("click", closeCart);
+drawerOverlay.addEventListener("click", closeCart);
+checkoutBtn.addEventListener("click", openCheckout);
+document.getElementById("closeCheckout").addEventListener("click", closeCheckout);
+checkoutOverlay.addEventListener("click", e => {
+    if (e.target === checkoutOverlay) closeCheckout();
+});
 document.addEventListener("keydown", e => {
-    if (e.key === "Escape") {
-        if (typeof closeCart === "function") closeCart();
-        if (typeof closeCheckout === "function") closeCheckout();
-    }
+    if (e.key === "Escape") { closeCart(); closeCheckout(); }
 });
 
-// Отслеживание посылки
-if (trackBtn) trackBtn.addEventListener("click", trackOrder);
+trackBtn.addEventListener("click", trackOrder);
+orderInput.addEventListener("keydown", e => { if (e.key === "Enter") trackOrder(); });
 
-if (orderInput) {
-    orderInput.addEventListener("keydown", e => {
-        if (e.key === "Enter") trackOrder();
-    });
-}
-
-// Старые демо-кнопки отслеживания
 document.querySelectorAll(".linky[data-demo]").forEach(btn => {
     btn.addEventListener("click", () => {
-        if (!orderInput) return;
         orderInput.value = btn.dataset.demo;
         trackOrder();
     });
 });
 
-// Старый поиск магазина — только если элемент существует
-if (searchInput) {
-    searchInput.addEventListener("input", renderProducts);
-}
+searchInput.addEventListener("input", renderProducts);
 
-// Старые категории магазина
 document.querySelectorAll(".nav-links [data-cat]").forEach(link => {
     link.addEventListener("click", () => {
-        if (!searchInput) return;
-
         activeCategory = link.dataset.cat;
         searchInput.value = "";
         renderChips();
         renderProducts();
     });
 });
+
+/* Toast helper */
+let toastTimer;
+function toast(message) {
+    const el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = message;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("show"));
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        el.classList.remove("show");
+        setTimeout(() => { el.hidden = true; }, 250);
+    }, 1600);
+}
+
 /* --------------------------------------------------------------------------
    SEED DEMO ORDERS — so tracking works before you've bought anything
    -------------------------------------------------------------------------- */
@@ -1387,211 +1350,3 @@ document.getElementById("year").textContent = new Date().getFullYear();
         "\n      await DEMO.api('admin','users:read')  -> 200" +
         "\n      await DEMO.login('manager')  |  DEMO.users()  |  DEMO.audit()");
 })();
-
-
-
-
-
-
-/* ==========================================================================
-   LOGISTICS — DELIVERY REQUESTS
-   ========================================================================== */
-
-let currentDeliveryRequestId = null;
-
-const deliveryForm = document.getElementById("deliveryForm");
-const deliveryMessage = document.getElementById("deliveryMessage");
-const routeOptions = document.getElementById("routeOptions");
-
-const requestedDateInput = document.getElementById("requestedDate");
-
-if (requestedDateInput) {
-    requestedDateInput.min = new Date().toISOString().slice(0, 10);
-}
-
-
-function showDeliveryMessage(message, isError = false) {
-    deliveryMessage.hidden = false;
-    deliveryMessage.textContent = message;
-    deliveryMessage.style.color = isError ? "#dc2626" : "#16a34a";
-}
-
-function getDeliveryFormData() {
-    return {
-        pickup_address: {
-            city: document.getElementById("pickupCity").value.trim(),
-            street: document.getElementById("pickupStreet").value.trim(),
-            building: document.getElementById("pickupBuilding").value.trim(),
-            apartment: document.getElementById("pickupApartment").value.trim()
-        },
-        delivery_address: {
-            city: document.getElementById("deliveryCity").value.trim(),
-            street: document.getElementById("deliveryStreet").value.trim(),
-            building: document.getElementById("deliveryBuilding").value.trim(),
-            apartment: document.getElementById("deliveryApartment").value.trim()
-        },
-        weight_kg: Number(document.getElementById("parcelWeight").value),
-        length_cm: Number(document.getElementById("parcelLength").value),
-        width_cm: Number(document.getElementById("parcelWidth").value),
-        height_cm: Number(document.getElementById("parcelHeight").value),
-        delivery_type: document.getElementById("deliveryType").value,
-        requested_date: document.getElementById("requestedDate").value
-    };
-}
-
-async function logisticsRequest(path, method = "GET", body = null) {
-    if (!SESSION?.token) {
-        throw new Error("Please sign in to create a delivery.");
-    }
-
-    const response = await fetch(`${Auth.API_BASE}${path}`, {
-        method,
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${SESSION.token}`
-        },
-        ...(body ? { body: JSON.stringify(body) } : {})
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-        throw new Error(data.error || data.message || `Request failed: HTTP ${response.status}`);
-    }
-
-    return data;
-}
-
-function renderRouteOptions(options) {
-    routeOptions.innerHTML = "";
-
-    if (!options.length) {
-        routeOptions.innerHTML = `
-            <div class="route-card">
-                <h3>No available routes</h3>
-                <p>There are currently no routes matching your delivery request.</p>
-            </div>`;
-        return;
-    }
-
-    options.forEach(option => {
-        const card = document.createElement("article");
-        card.className = "route-card";
-
-        const routeId = option.route_id;
-
-        card.innerHTML = `
-            <h3>Route #${routeId}</h3>
-            <p><strong>From:</strong> ${option.pickup_city || "Pickup depot"}</p>
-            <p><strong>To:</strong> ${option.delivery_city || "Delivery depot"}</p>
-            <p><strong>Driver:</strong> ${option.driver_name || "Assigned driver"}</p>
-            <p><strong>Vehicle:</strong> ${option.vehicle_type || "Available vehicle"}</p>
-            <p><strong>Distance:</strong> ${option.distance_km ?? "—"} km</p>
-            <button class="btn btn-primary" type="button" data-confirm-route="${routeId}">
-                Confirm this route
-            </button>
-        `;
-
-        routeOptions.appendChild(card);
-    });
-}
-
-deliveryForm.addEventListener("submit", async event => {
-    event.preventDefault();
-
-    try {
-        if (!SESSION?.token) {
-            showDeliveryMessage("Please sign in before creating a delivery.", true);
-            openAuth("login");
-            return;
-        }
-
-        const guard = await Auth.requireAuth("orders:create")(SESSION.token);
-
-        if (!guard.ok) {
-            showDeliveryMessage(guard.error || "You are not allowed to create a delivery.", true);
-            return;
-        }
-
-        showDeliveryMessage("Creating your delivery request...");
-        routeOptions.innerHTML = "";
-
-        const request = await logisticsRequest(
-            "/api/delivery-requests",
-            "POST",
-            getDeliveryFormData()
-        );
-
-        currentDeliveryRequestId = request.request_id;
-
-        showDeliveryMessage(
-            `Delivery request #${currentDeliveryRequestId} created. Searching for available routes...`
-        );
-
-        const result = await logisticsRequest(
-            `/api/delivery-requests/${currentDeliveryRequestId}/options`
-        );
-
-        renderRouteOptions(result.options || []);
-
-        showDeliveryMessage(
-            `Request #${currentDeliveryRequestId}: found ${result.options_count ?? (result.options || []).length} route option(s).`
-        );
-
-    } catch (error) {
-        console.error("Delivery request error:", error);
-        showDeliveryMessage(error.message, true);
-    }
-});
-
-routeOptions.addEventListener("click", async event => {
-    const button = event.target.closest("[data-confirm-route]");
-    if (!button) return;
-
-    const routeId = Number(button.dataset.confirmRoute);
-
-    if (!currentDeliveryRequestId || !routeId) {
-        showDeliveryMessage("Missing delivery request or route ID.", true);
-        return;
-    }
-
-    try {
-        button.disabled = true;
-        button.textContent = "Confirming...";
-
-        const result = await logisticsRequest(
-            `/api/delivery-requests/${currentDeliveryRequestId}/confirm`,
-            "POST",
-            { route_id: routeId }
-        );
-
-        showDeliveryMessage(
-            `Delivery confirmed! Order #${result.order_id}. Tracking number: ${result.tracking_number}`
-        );
-
-        routeOptions.innerHTML = `
-            <div class="route-card">
-                <h3>Delivery confirmed!</h3>
-                <p><strong>Order:</strong> #${result.order_id}</p>
-                <p><strong>Tracking number:</strong> ${result.tracking_number}</p>
-                <button class="btn btn-primary" id="trackNewParcel" type="button">
-                    Track parcel
-                </button>
-            </div>
-        `;
-
-        document.getElementById("trackNewParcel").addEventListener("click", () => {
-            document.getElementById("orderInput").value = result.tracking_number;
-            document.getElementById("track").scrollIntoView({ behavior: "smooth" });
-            trackOrder();
-        });
-
-        renderWorkspace();
-
-    } catch (error) {
-        console.error("Route confirmation error:", error);
-        showDeliveryMessage(error.message, true);
-        button.disabled = false;
-        button.textContent = "Confirm this route";
-    }
-});
