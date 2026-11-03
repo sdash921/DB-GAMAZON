@@ -1,6 +1,6 @@
 
 const API_BASE = "http://localhost:3000";
-
+console.log("DELIVERY JS LOADED");
 async function deliveryRequest(path, options = {}) {
     const token = localStorage.getItem("token");
 
