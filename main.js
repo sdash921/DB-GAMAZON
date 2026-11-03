@@ -564,54 +564,65 @@ async function trackOrder() {
 /* --------------------------------------------------------------------------
    UI — WIRING
    -------------------------------------------------------------------------- */
-document.getElementById("openCart").addEventListener("click", openCart);
-document.getElementById("closeCart").addEventListener("click", closeCart);
-drawerOverlay.addEventListener("click", closeCart);
-checkoutBtn.addEventListener("click", openCheckout);
-document.getElementById("closeCheckout").addEventListener("click", closeCheckout);
-checkoutOverlay.addEventListener("click", e => {
-    if (e.target === checkoutOverlay) closeCheckout();
-});
+
+// Старые элементы магазина — подключаем только если они существуют
+const openCartBtn = document.getElementById("openCart");
+const closeCartBtn = document.getElementById("closeCart");
+const closeCheckoutBtn = document.getElementById("closeCheckout");
+
+if (openCartBtn) openCartBtn.addEventListener("click", openCart);
+if (closeCartBtn) closeCartBtn.addEventListener("click", closeCart);
+if (drawerOverlay) drawerOverlay.addEventListener("click", closeCart);
+if (checkoutBtn) checkoutBtn.addEventListener("click", openCheckout);
+if (closeCheckoutBtn) closeCheckoutBtn.addEventListener("click", closeCheckout);
+
+if (checkoutOverlay) {
+    checkoutOverlay.addEventListener("click", e => {
+        if (e.target === checkoutOverlay) closeCheckout();
+    });
+}
+
 document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeCart(); closeCheckout(); }
+    if (e.key === "Escape") {
+        if (typeof closeCart === "function") closeCart();
+        if (typeof closeCheckout === "function") closeCheckout();
+    }
 });
 
-trackBtn.addEventListener("click", trackOrder);
-orderInput.addEventListener("keydown", e => { if (e.key === "Enter") trackOrder(); });
+// Отслеживание посылки
+if (trackBtn) trackBtn.addEventListener("click", trackOrder);
 
+if (orderInput) {
+    orderInput.addEventListener("keydown", e => {
+        if (e.key === "Enter") trackOrder();
+    });
+}
+
+// Старые демо-кнопки отслеживания
 document.querySelectorAll(".linky[data-demo]").forEach(btn => {
     btn.addEventListener("click", () => {
+        if (!orderInput) return;
         orderInput.value = btn.dataset.demo;
         trackOrder();
     });
 });
 
-searchInput.addEventListener("input", renderProducts);
+// Старый поиск магазина — только если элемент существует
+if (searchInput) {
+    searchInput.addEventListener("input", renderProducts);
+}
 
+// Старые категории магазина
 document.querySelectorAll(".nav-links [data-cat]").forEach(link => {
     link.addEventListener("click", () => {
+        if (!searchInput) return;
+
         activeCategory = link.dataset.cat;
         searchInput.value = "";
         renderChips();
         renderProducts();
     });
 });
-
-/* Toast helper */
-let toastTimer;
-function toast(message) {
-    const el = document.getElementById("toast");
-    if (!el) return;
-    el.textContent = message;
-    el.hidden = false;
-    requestAnimationFrame(() => el.classList.add("show"));
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-        el.classList.remove("show");
-        setTimeout(() => { el.hidden = true; }, 250);
-    }, 1600);
-}
-
 /* --------------------------------------------------------------------------
    SEED DEMO ORDERS — so tracking works before you've bought anything
    -------------------------------------------------------------------------- */
