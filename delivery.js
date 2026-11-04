@@ -2,24 +2,21 @@
 const DELIVERY_API_BASE = "http://localhost:3000";
 console.log("DELIVERY JS LOADED");
 async function deliveryRequest(path, options = {}) {
-    const token = localStorage.getItem("token");
+    const session = JSON.parse(
+        localStorage.getItem("gamazon.session") || "null"
+    );
 
-    const response = await fetch(`${DELIVERY_API_BASE}${path}`, {
-        ...options,
-        headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...options.headers
-        }
+    const result = await Auth.fetch(path, {
+        method: options.method || "GET",
+        body: options.body ? JSON.parse(options.body) : undefined,
+        token: session?.token
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-        throw new Error(data.error || data.message || "Request failed");
+    if (!result.ok) {
+        throw new Error(result.error || "Request failed");
     }
 
-    return data;
+    return result.data;
 }
 
 // Создание заявки на доставку
