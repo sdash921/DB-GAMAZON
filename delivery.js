@@ -23,9 +23,10 @@ async function deliveryRequest(path, options = {}) {
 async function createDeliveryRequest(deliveryData) {
     return deliveryRequest("/api/delivery-requests", {
         method: "POST",
-        body: JSON.stringify(deliveryData)
+        body: deliveryData
     });
 }
+
 
 // Получение доступных маршрутов
 async function getDeliveryOptions(requestId) {
@@ -40,7 +41,7 @@ async function confirmDelivery(requestId, routeId) {
         `/api/delivery-requests/${requestId}/confirm`,
         {
             method: "POST",
-            body: JSON.stringify({ route_id: routeId })
+            body: { route_id: routeId }
         }
     );
 }
