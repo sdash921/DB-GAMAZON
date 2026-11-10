@@ -544,16 +544,24 @@ async function trackOrder() {
         const data = await trackDelivery(id);
         const parcel = data.parcel || {};
         const order = data.order || {};
+        const history = Array.isArray(data.history) ? data.history : [];
+        // A status event may have no depot_id. Keep showing the last known
+        // location from an earlier event that did record a depot.
+        const lastKnownLocation = [...history].reverse().find(item => item.city || item.depot_name);
+        const currentCity = data.current_city || lastKnownLocation?.city || null;
+        const latestHistoryEvent = history[history.length - 1];
+        const currentStatus = latestHistoryEvent?.status || data.current_status || order.status || "—";
+        const lastUpdate = latestHistoryEvent?.timestamp || data.last_update;
         metaEl.innerHTML = `
             <div class="meta-row"><span>Tracking number</span><span>${escapeHtml(data.tracking_number || id)}</span></div>
             <div class="meta-row"><span>Order</span><span>#${escapeHtml(order.order_id ?? "—")}</span></div>
             <div class="meta-row"><span>Parcel weight</span><span>${escapeHtml(parcel.weight_kg ?? "—")} kg</span></div>
             <div class="meta-row"><span>Service</span><span>${escapeHtml(parcel.parcel_type ?? "—")}</span></div>
-            <div class="meta-row"><span>Current status</span><span>${escapeHtml(data.current_status ?? order.status ?? "—")}</span></div>
-            <div class="meta-row"><span>Current city</span><span>${escapeHtml(data.current_city ?? "Not recorded")}</span></div>
-            <div class="meta-row"><span>Last update</span><span>${data.last_update ? escapeHtml(new Date(data.last_update).toLocaleString()) : "—"}</span></div>
+            <div class="meta-row"><span>Current status</span><span>${escapeHtml(currentStatus)}</span></div>
+            <div class="meta-row"><span>Current city</span><span>${escapeHtml(currentCity || "Not recorded")}</span></div>
+            <div class="meta-row"><span>Last update</span><span>${lastUpdate ? escapeHtml(new Date(lastUpdate).toLocaleString()) : "—"}</span></div>
         `;
-        const events = (data.history || []).map(item => ({
+        const events = history.map(item => ({
             title: item.status,
             time: item.timestamp ? new Date(item.timestamp).toLocaleString() : "—",
             desc: [item.depot_name, item.city].filter(Boolean).join(" · ") || "Status recorded in the logistics system."
@@ -1069,12 +1077,12 @@ async function renderFulfilmentQueue() {
                         <span class="ws-amount">${Number(o.total_cost || 0).toFixed(2)} ₸</span>
                         <span class="status-pill" data-status="${escapeHtml(o.status)}">${escapeHtml(o.status)}</span>
                         ${o.tracking_number ? `
-                            <select class="ws-select" data-status-for="${escapeHtml(o.tracking_number)}">
+                            <select class="ws-select" data-status-for="${escapeHtml(o.tracking_number)}" ${["Delivered", "Cancelled"].includes(o.status) ? "disabled" : ""}>
                                 ${["Created", "In Transit", "At Depot", "Out for delivery", "Delivered", "Cancelled"].map(s =>
                                     `<option value="${s}"${s === o.status ? " selected" : ""}>${s}</option>`
                                 ).join("")}
                             </select>
-                            <button class="ws-link" data-save-status="${escapeHtml(o.tracking_number)}">Save</button>
+                            <button class="ws-link" data-save-status="${escapeHtml(o.tracking_number)}" ${["Delivered", "Cancelled"].includes(o.status) ? 'disabled title="Terminal status cannot be changed"' : ""}>Save</button>
                             <button class="ws-link" data-track="${escapeHtml(o.tracking_number)}">Track</button>
                         ` : `<span class="ws-sub">No parcel tracking record</span>`}
                     </div>
