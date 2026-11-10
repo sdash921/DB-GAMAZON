@@ -1,5 +1,7 @@
 console.log("NEW AUTH JS LOADED - 2026");
-const API_BASE = "http://localhost:3000";
+// For local development the API runs on this computer. For deployment, set
+// window.GAMAZON_API_BASE before auth.js to your hosted backend URL.
+const API_BASE = window.GAMAZON_API_BASE || "http://localhost:3000";
 
 const ROLES = [
     { role_id: 1, role_name: "user" },
