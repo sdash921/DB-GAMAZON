@@ -473,15 +473,16 @@ const trackBtn = document.getElementById("trackBtn");
 const metaEl = document.getElementById("orderMeta");
 const timelineEl = document.getElementById("timeline");
 
-function renderMeta({ order, customer, items }) {
+function renderMeta({ order, customer, items = [] }) {
     const itemText = items.map(i => `${i.quantity}× ${i.name}`).join(", ");
+    const total = Number(order.total);
     metaEl.innerHTML = `
-        <div class="meta-row"><span>Order</span><span>${order.order_id}</span></div>
-        <div class="meta-row"><span>Placed by</span><span>${customer ? customer.name : "Guest"}</span></div>
-        <div class="meta-row"><span>Items</span><span>${itemText}</span></div>
-        <div class="meta-row"><span>Deliver to</span><span>${order.address}</span></div>
-        <div class="meta-row"><span>Total</span><span>$${order.total.toFixed(2)}</span></div>
-        <div class="meta-row"><span>Status</span><span>${order.order_status}</span></div>
+        <div class="meta-row"><span>Order</span><span>${escapeHtml(order.order_id)}</span></div>
+        <div class="meta-row"><span>Placed by</span><span>${escapeHtml(customer ? customer.name : "Guest")}</span></div>
+        <div class="meta-row"><span>Items</span><span>${escapeHtml(itemText)}</span></div>
+        <div class="meta-row"><span>Deliver to</span><span>${escapeHtml(order.address)}</span></div>
+        <div class="meta-row"><span>Total</span><span>${Number.isFinite(total) ? `$${total.toFixed(2)}` : "Not priced"}</span></div>
+        <div class="meta-row"><span>Status</span><span>${escapeHtml(order.order_status)}</span></div>
     `;
 }
 
@@ -495,9 +496,9 @@ function renderTimeline(events) {
         const state = isLast ? "active" : "done";
         timelineEl.insertAdjacentHTML("beforeend", `
             <div class="tl-item ${state}" style="animation-delay:${i * 70}ms">
-                <div class="tl-title">${ev.title}</div>
-                <div class="tl-time">${ev.time}</div>
-                <div class="tl-desc">${ev.desc}</div>
+                <div class="tl-title">${escapeHtml(ev.title)}</div>
+                <div class="tl-time">${escapeHtml(ev.time)}</div>
+                <div class="tl-desc">${escapeHtml(ev.desc)}</div>
             </div>
         `);
     });
@@ -548,7 +549,7 @@ async function trackOrder() {
         // A status event may have no depot_id. Keep showing the last known
         // location from an earlier event that did record a depot.
         const lastKnownLocation = [...history].reverse().find(item => item.city || item.depot_name);
-        const currentCity = data.current_city || lastKnownLocation?.city || null;
+        const currentCity = data.current_city || lastKnownLocation?.city || lastKnownLocation?.depot_name || null;
         const latestHistoryEvent = history[history.length - 1];
         const currentStatus = latestHistoryEvent?.status || data.current_status || order.status || "—";
         const lastUpdate = latestHistoryEvent?.timestamp || data.last_update;
@@ -1067,26 +1068,30 @@ async function renderFulfilmentQueue() {
             <p class="ws-note">Manage real parcels from the logistics database. Status changes are saved
                 to PostgreSQL and appear in the customer's tracking history.</p>
             <div class="ws-fulfil-list">
-                ${orders.map(o => `
+                ${orders.map(o => {
+                    const status = String(o.status || "Created").trim();
+                    const terminal = ["Delivered", "Cancelled"].includes(status);
+                    const amount = Number(o.total_cost);
+                    return `
                     <div class="ws-row ws-fulfil-row">
                         <div>
                             <strong>Order #${escapeHtml(o.order_id)}</strong>
                             <span class="ws-sub">${escapeHtml(o.tracking_number || "No tracking number")}</span>
                             <span class="ws-sub">${o.order_date ? new Date(o.order_date).toLocaleString() : ""}</span>
                         </div>
-                        <span class="ws-amount">${Number(o.total_cost || 0).toFixed(2)} ₸</span>
-                        <span class="status-pill" data-status="${escapeHtml(o.status)}">${escapeHtml(o.status)}</span>
+                        <span class="ws-amount">${Number.isFinite(amount) && amount > 0 ? `${amount.toFixed(2)} ₸` : "Not priced"}</span>
+                        <span class="status-pill" data-status="${escapeHtml(status)}">${escapeHtml(status)}</span>
                         ${o.tracking_number ? `
-                            <select class="ws-select" data-status-for="${escapeHtml(o.tracking_number)}" ${["Delivered", "Cancelled"].includes(o.status) ? "disabled" : ""}>
+                            <select class="ws-select" data-status-for="${escapeHtml(o.tracking_number)}" ${terminal ? "disabled" : ""}>
                                 ${["Created", "In Transit", "At Depot", "Out for delivery", "Delivered", "Cancelled"].map(s =>
-                                    `<option value="${s}"${s === o.status ? " selected" : ""}>${s}</option>`
+                                    `<option value="${s}"${s === status ? " selected" : ""}>${s}</option>`
                                 ).join("")}
                             </select>
-                            <button class="ws-link" data-save-status="${escapeHtml(o.tracking_number)}" ${["Delivered", "Cancelled"].includes(o.status) ? 'disabled title="Terminal status cannot be changed"' : ""}>Save</button>
+                            <button class="ws-link" data-save-status="${escapeHtml(o.tracking_number)}" ${terminal ? 'disabled title="Terminal status cannot be changed"' : ""}>Save</button>
                             <button class="ws-link" data-track="${escapeHtml(o.tracking_number)}">Track</button>
                         ` : `<span class="ws-sub">No parcel tracking record</span>`}
-                    </div>
-                `).join("") || '<p class="ws-empty">No database orders found.</p>'}
+                    </div>`;
+                }).join("") || '<p class="ws-empty">No database orders found.</p>'}
             </div>`;
     } catch (error) {
         if (SESSION?.token === token && activeWsTab === "fulfil") {
@@ -1185,10 +1190,10 @@ async function renderWsPanel(tab) {
             </div>
             <div class="sec-card">
                 <span class="sec-label">Session token (JWT, HS256)</span>
-                <code class="token-cell">${SESSION.token}</code>
-                <p>Signed by the server with <code>JWT_SECRET</code> and verified on every
-                    request by <code>middleware/auth.js</code>. Try editing it in
-                    localStorage — the signature check fails and the next call returns 403.</p>
+                <code class="token-cell">JWT stored locally (masked)</code>
+                <p>The signed token is stored in browser localStorage and verified by
+                    <code>middleware/auth.js</code> on protected API requests. Never share
+                    the token or paste it into screenshots.</p>
             </div>
             <div class="sec-card">
                 <span class="sec-label">Permissions of my role</span>
@@ -1240,7 +1245,8 @@ document.getElementById("wsPanel").addEventListener("click", async e => {
     const saveStatus = e.target.closest("[data-save-status]");
     if (saveStatus) {
         const trackingNumber = saveStatus.dataset.saveStatus;
-        const select = document.querySelector(`[data-status-for="${trackingNumber}"]`);
+        const select = [...document.querySelectorAll("[data-status-for]")]
+            .find(element => element.dataset.statusFor === trackingNumber);
         if (!select) return;
         saveStatus.disabled = true;
         saveStatus.textContent = "Saving...";
