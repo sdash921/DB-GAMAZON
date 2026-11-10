@@ -474,14 +474,17 @@ const metaEl = document.getElementById("orderMeta");
 const timelineEl = document.getElementById("timeline");
 
 function renderMeta({ order, customer, items }) {
-    const itemText = items.map(i => `${i.quantity}× ${i.name}`).join(", ");
+    const itemText = items
+        .map(i => `${i.quantity}× ${escapeHtml(i.name)}`)
+        .join(", ");
+
     metaEl.innerHTML = `
-        <div class="meta-row"><span>Order</span><span>${order.order_id}</span></div>
-        <div class="meta-row"><span>Placed by</span><span>${customer ? customer.name : "Guest"}</span></div>
+        <div class="meta-row"><span>Order</span><span>${escapeHtml(order.order_id)}</span></div>
+        <div class="meta-row"><span>Placed by</span><span>${escapeHtml(customer?.name || "Guest")}</span></div>
         <div class="meta-row"><span>Items</span><span>${itemText}</span></div>
-        <div class="meta-row"><span>Deliver to</span><span>${order.address}</span></div>
-        <div class="meta-row"><span>Total</span><span>$${order.total.toFixed(2)}</span></div>
-        <div class="meta-row"><span>Status</span><span>${order.order_status}</span></div>
+        <div class="meta-row"><span>Deliver to</span><span>${escapeHtml(order.address)}</span></div>
+        <div class="meta-row"><span>Total</span><span>$${Number(order.total || 0).toFixed(2)}</span></div>
+        <div class="meta-row"><span>Status</span><span>${escapeHtml(order.order_status)}</span></div>
     `;
 }
 
@@ -493,20 +496,24 @@ function renderTimeline(events, showPendingStages = true) {
     events.forEach((ev, i) => {
         const isLast = i === reached - 1;
         const state = isLast ? "active" : "done";
+
         timelineEl.insertAdjacentHTML("beforeend", `
             <div class="tl-item ${state}" style="animation-delay:${i * 70}ms">
-                <div class="tl-title">${ev.title}</div>
-                <div class="tl-time">${ev.time}</div>
-                <div class="tl-desc">${ev.desc}</div>
+                <div class="tl-title">${escapeHtml(ev.title)}</div>
+                <div class="tl-time">${escapeHtml(ev.time)}</div>
+                <div class="tl-desc">${escapeHtml(ev.desc)}</div>
             </div>
         `);
     });
 
-    const remaining = showPendingStages ? Math.max(0, LIFECYCLE.length - reached) : 0;
+    const remaining = showPendingStages
+        ? Math.max(0, LIFECYCLE.length - reached)
+        : 0;
+
     for (let i = 0; i < remaining; i++) {
         timelineEl.insertAdjacentHTML("beforeend", `
             <div class="tl-item pending">
-                <div class="tl-title">${LIFECYCLE[reached + i]}</div>
+                <div class="tl-title">${escapeHtml(LIFECYCLE[reached + i])}</div>
                 <div class="tl-time">pending</div>
                 <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
             </div>
@@ -819,17 +826,23 @@ function updatePwRules(password) {
 
 /* ---- ROLE WORKSPACE: three different interfaces for three roles ---- */
 function wsOrderRows(orders, actions) {
-    if (!orders.length) return `<p class="ws-empty">No orders yet.</p>`;
+    if (!orders.length) {
+        return `<p class="ws-empty">No orders yet.</p>`;
+    }
+
     return `<div class="ws-table">` + orders.map(o => `
         <div class="ws-row">
             <div>
-                <strong>${o.order_id}</strong>
-                <span class="ws-sub">${o.address}</span>
+                <strong>${escapeHtml(o.order_id)}</strong>
+                <span class="ws-sub">${escapeHtml(o.address)}</span>
             </div>
-            <span class="ws-amount">$${o.total.toFixed(2)}</span>
-            <span class="status-pill" data-status="${o.order_status}">${o.order_status}</span>
+            <span class="ws-amount">$${Number(o.total || 0).toFixed(2)}</span>
+            <span class="status-pill" data-status="${escapeHtml(o.order_status)}">
+                ${escapeHtml(o.order_status)}
+            </span>
             ${actions ? actions(o) : ""}
-        </div>`).join("") + `</div>`;
+        </div>
+    `).join("") + `</div>`;
 }
 
 /* Which tabs each role sees. Tabs are built from the SAME permission matrix
@@ -1135,7 +1148,7 @@ async function renderWsPanel(tab) {
             </div>
             <div class="sec-card">
                 <span class="sec-label">Session token (JWT, HS256)</span>
-                <code class="token-cell">${SESSION.token}</code>
+                <code class="token-cell">${escapeHtml(SESSION.token)}</code>
                 <p>Signed by the server with <code>JWT_SECRET</code> and verified on every
                     request by <code>middleware/auth.js</code>. Try editing it in
                     localStorage — the signature check fails and the next call returns 403.</p>
