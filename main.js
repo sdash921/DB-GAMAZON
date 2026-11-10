@@ -502,15 +502,20 @@ function renderTimeline(events) {
         `);
     });
 
-    const remaining = LIFECYCLE.length - reached;
-    for (let i = 0; i < remaining; i++) {
-        timelineEl.insertAdjacentHTML("beforeend", `
-            <div class="tl-item pending">
-                <div class="tl-title">${LIFECYCLE[reached + i]}</div>
-                <div class="tl-time">pending</div>
-                <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
-            </div>
-        `);
+    // Terminal statuses must not be followed by fictional pending lifecycle stages.
+    const lastTitle = String(events[events.length - 1]?.title || "").trim().toLowerCase();
+    const isTerminal = ["delivered", "cancelled", "canceled"].includes(lastTitle);
+    if (!isTerminal) {
+        const remaining = Math.max(0, LIFECYCLE.length - reached);
+        for (let i = 0; i < remaining; i++) {
+            timelineEl.insertAdjacentHTML("beforeend", `
+                <div class="tl-item pending">
+                    <div class="tl-title">${escapeHtml(LIFECYCLE[reached + i])}</div>
+                    <div class="tl-time">pending</div>
+                    <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
+                </div>
+            `);
+        }
     }
 }
 
