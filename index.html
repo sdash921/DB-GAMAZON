@@ -27,6 +27,7 @@
                 <a href="#shop" data-cat="Electronics">Electronics</a>
                 <a href="#shop" data-cat="Home">Home</a>
                 <a href="#shop" data-cat="Fashion">Fashion</a>
+                <a href="#delivery-request">Request delivery</a>
                 <a href="#track">Track order</a>
             </nav>
 
@@ -103,11 +104,76 @@
         <p class="empty-msg" id="emptyMsg" hidden>No products match your search. Try another keyword.</p>
     </section>
 
+    <!-- ============ DELIVERY REQUEST (DATABASE-BACKED) ============ -->
+    <section class="section delivery-section" id="delivery-request">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Logistics service</p>
+                <h2>Send a parcel</h2>
+                <p>Create a delivery request, compare available routes and confirm your shipment.</p>
+            </div>
+        </div>
+
+        <div class="delivery-layout">
+            <form id="deliveryRequestForm" class="delivery-card form">
+                <div class="delivery-card-title">
+                    <span class="delivery-step">01</span>
+                    <div><h3>Parcel details</h3><p>Pickup, destination and package size</p></div>
+                </div>
+                <div class="delivery-address-grid">
+                    <fieldset>
+                        <legend>Pickup address</legend>
+                        <label>City<input name="pickup_city" required placeholder="Almaty"></label>
+                        <label>Street<input name="pickup_street" required placeholder="Abay Avenue"></label>
+                        <div class="delivery-two">
+                            <label>Building<input name="pickup_building" required placeholder="10"></label>
+                            <label>Apartment <span class="optional">(optional)</span><input name="pickup_apartment" placeholder="25"></label>
+                        </div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>Delivery address</legend>
+                        <label>City<input name="delivery_city" required placeholder="Astana"></label>
+                        <label>Street<input name="delivery_street" required placeholder="Mangilik El"></label>
+                        <div class="delivery-two">
+                            <label>Building<input name="delivery_building" required placeholder="25"></label>
+                            <label>Apartment <span class="optional">(optional)</span><input name="delivery_apartment" placeholder="12"></label>
+                        </div>
+                    </fieldset>
+                </div>
+                <div class="delivery-details-grid">
+                    <label>Weight (kg)<input name="weight_kg" type="number" min="0.1" step="0.1" value="1" required></label>
+                    <label>Length (cm)<input name="length_cm" type="number" min="1" step="1" placeholder="30"></label>
+                    <label>Width (cm)<input name="width_cm" type="number" min="1" step="1" placeholder="20"></label>
+                    <label>Height (cm)<input name="height_cm" type="number" min="1" step="1" placeholder="15"></label>
+                </div>
+                <div class="delivery-details-grid delivery-bottom-grid">
+                    <label>Service type
+                        <select name="delivery_type" required><option value="Standard">Standard</option><option value="Express">Express</option></select>
+                    </label>
+                    <label>Requested date<input name="requested_date" type="date" required></label>
+                </div>
+                <p class="delivery-auth-note" id="deliveryAuthNote">Sign in with a Customer account to create a delivery request.</p>
+                <button class="btn btn-primary" id="findDeliveryRoutes" type="submit">Find available routes</button>
+                <p class="delivery-feedback" id="deliveryFeedback" role="status" aria-live="polite"></p>
+            </form>
+
+            <div class="delivery-card delivery-results-card">
+                <div class="delivery-card-title">
+                    <span class="delivery-step">02</span>
+                    <div><h3>Available routes</h3><p>Routes are loaded from the logistics database</p></div>
+                </div>
+                <div id="deliveryResults" class="delivery-results">
+                    <div class="delivery-empty">Your matching routes will appear here after you submit a request.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- ============ TRACK ORDER ============ -->
     <section class="section section-alt" id="track">
         <div class="section-head">
             <h2>Track your order</h2>
-            <p>Enter your order number and we'll show you exactly where your parcel is.</p>
+            <p>Enter your order number or parcel tracking number and we'll show you exactly where your parcel is.</p>
         </div>
 
         <div class="tracker">
