@@ -519,20 +519,48 @@ function showTrackingPlaceholder(message) {
     timelineEl.innerHTML = `<div class="tl-empty">${message}</div>`;
 }
 
-function trackOrder() {
+async function trackOrder() {
     const id = orderInput.value.trim();
     if (!id) {
-        toast("Please enter an order number");
+        toast("Please enter an order or tracking number");
         return;
     }
-    const result = getOrder(id);
-    if (!result) {
+
+    // Preserve the original local storefront demo orders.
+    const localResult = getOrder(id);
+    if (localResult) {
+        renderMeta(localResult);
+        renderTimeline(localResult.events);
+        return;
+    }
+
+    // Real parcel tracking is loaded from PostgreSQL by tracking number.
+    try {
+        const data = await trackDelivery(id);
+        const parcel = data.parcel || {};
+        const order = data.order || {};
+        metaEl.innerHTML = `
+            <div class="meta-row"><span>Tracking number</span><span>${escapeHtml(data.tracking_number || id)}</span></div>
+            <div class="meta-row"><span>Order</span><span>#${escapeHtml(order.order_id ?? "—")}</span></div>
+            <div class="meta-row"><span>Parcel weight</span><span>${escapeHtml(parcel.weight_kg ?? "—")} kg</span></div>
+            <div class="meta-row"><span>Service</span><span>${escapeHtml(parcel.parcel_type ?? "—")}</span></div>
+            <div class="meta-row"><span>Current status</span><span>${escapeHtml(data.current_status ?? order.status ?? "—")}</span></div>
+            <div class="meta-row"><span>Current city</span><span>${escapeHtml(data.current_city ?? "Not recorded")}</span></div>
+            <div class="meta-row"><span>Last update</span><span>${data.last_update ? escapeHtml(new Date(data.last_update).toLocaleString()) : "—"}</span></div>
+        `;
+        const events = (data.history || []).map(item => ({
+            title: item.status,
+            time: item.timestamp ? new Date(item.timestamp).toLocaleString() : "—",
+            desc: [item.depot_name, item.city].filter(Boolean).join(" · ") || "Status recorded in the logistics system."
+        }));
+        if (!events.length && data.current_status) {
+            events.push({ title:data.current_status, time:"Latest status", desc:data.current_city || "Status recorded in the logistics system." });
+        }
+        renderTimeline(events);
+    } catch (error) {
         metaEl.innerHTML = "";
-        showTrackingPlaceholder(`We couldn't find order <strong>${id}</strong>.<br>Check the number and try again.`);
-        return;
+        showTrackingPlaceholder(`We couldn't find parcel <strong>${escapeHtml(id)}</strong>. ${escapeHtml(error.message || "Check the tracking number and try again.")}`);
     }
-    renderMeta(result);
-    renderTimeline(result.events);
 }
 
 /* --------------------------------------------------------------------------
@@ -1327,11 +1355,8 @@ document.getElementById("year").textContent = new Date().getFullYear();
 
 /* --- Week 5: restore the session, then paint the role-aware interface --- */
 (async function initAuth() {
-    /* The three demo accounts already exist by the time this runs (auth.js
-       creates them synchronously). seedUsers() only fills in their password
-       hashes, in the background — so a role button clicked immediately still
-       works, it just does not need a hash. */
-    seedUsers().catch(err => console.error("GAmazon auth: seeding failed", err));
+    /* Demo accounts are authenticated against PostgreSQL; the frontend does
+       not create or seed users. */
 
     const stored = loadStoredSession();
     if (stored?.token) {
