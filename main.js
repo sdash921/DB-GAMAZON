@@ -485,7 +485,7 @@ function renderMeta({ order, customer, items }) {
     `;
 }
 
-function renderTimeline(events) {
+function renderTimeline(events, { showPending = true } = {}) {
     const reached = events.length;
     timelineEl.classList.remove("has-empty");
     timelineEl.innerHTML = "";
@@ -502,15 +502,19 @@ function renderTimeline(events) {
         `);
     });
 
-    const remaining = LIFECYCLE.length - reached;
-    for (let i = 0; i < remaining; i++) {
-        timelineEl.insertAdjacentHTML("beforeend", `
-            <div class="tl-item pending">
-                <div class="tl-title">${LIFECYCLE[reached + i]}</div>
-                <div class="tl-time">pending</div>
-                <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
-            </div>
-        `);
+    // Database tracking renders only events that actually exist in PostgreSQL.
+    // Demo storefront orders may still show the illustrative pending lifecycle.
+    if (showPending) {
+        const remaining = Math.max(0, LIFECYCLE.length - reached);
+        for (let i = 0; i < remaining; i++) {
+            timelineEl.insertAdjacentHTML("beforeend", `
+                <div class="tl-item pending">
+                    <div class="tl-title">${LIFECYCLE[reached + i]}</div>
+                    <div class="tl-time">pending</div>
+                    <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
+                </div>
+            `);
+        }
     }
 }
 
@@ -556,7 +560,7 @@ async function trackOrder() {
         if (!events.length && data.current_status) {
             events.push({ title:data.current_status, time:"Latest status", desc:data.current_city || "Status recorded in the logistics system." });
         }
-        renderTimeline(events);
+        renderTimeline(events, { showPending: false });
     } catch (error) {
         metaEl.innerHTML = "";
         showTrackingPlaceholder(`We couldn't find parcel <strong>${escapeHtml(id)}</strong>. ${escapeHtml(error.message || "Check the tracking number and try again.")}`);
