@@ -485,7 +485,7 @@ function renderMeta({ order, customer, items }) {
     `;
 }
 
-function renderTimeline(events, { showPending = true } = {}) {
+function renderTimeline(events, showPendingStages = true) {
     const reached = events.length;
     timelineEl.classList.remove("has-empty");
     timelineEl.innerHTML = "";
@@ -502,19 +502,15 @@ function renderTimeline(events, { showPending = true } = {}) {
         `);
     });
 
-    // Database tracking renders only events that actually exist in PostgreSQL.
-    // Demo storefront orders may still show the illustrative pending lifecycle.
-    if (showPending) {
-        const remaining = Math.max(0, LIFECYCLE.length - reached);
-        for (let i = 0; i < remaining; i++) {
-            timelineEl.insertAdjacentHTML("beforeend", `
-                <div class="tl-item pending">
-                    <div class="tl-title">${LIFECYCLE[reached + i]}</div>
-                    <div class="tl-time">pending</div>
-                    <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
-                </div>
-            `);
-        }
+    const remaining = showPendingStages ? Math.max(0, LIFECYCLE.length - reached) : 0;
+    for (let i = 0; i < remaining; i++) {
+        timelineEl.insertAdjacentHTML("beforeend", `
+            <div class="tl-item pending">
+                <div class="tl-title">${LIFECYCLE[reached + i]}</div>
+                <div class="tl-time">pending</div>
+                <div class="tl-desc">We'll update you as soon as this stage is reached.</div>
+            </div>
+        `);
     }
 }
 
@@ -560,7 +556,9 @@ async function trackOrder() {
         if (!events.length && data.current_status) {
             events.push({ title:data.current_status, time:"Latest status", desc:data.current_city || "Status recorded in the logistics system." });
         }
-        renderTimeline(events, { showPending: false });
+        // Real PostgreSQL tracking: display only recorded history events.
+        // Do not append the storefront demo lifecycle placeholders.
+        renderTimeline(events, false);
     } catch (error) {
         metaEl.innerHTML = "";
         showTrackingPlaceholder(`We couldn't find parcel <strong>${escapeHtml(id)}</strong>. ${escapeHtml(error.message || "Check the tracking number and try again.")}`);
@@ -1040,53 +1038,6 @@ async function renderDatabaseOrders(tab) {
     }
 }
 
-async function renderFulfilmentQueue() {
-    const panel = document.getElementById("wsPanel");
-    const token = SESSION?.token;
-    panel.innerHTML = `<h4>Fulfilment queue</h4><p>Loading parcels...</p>`;
-    try {
-        const response = await fetch(`${Auth.API_BASE}/api/orders?page=1&limit=100&sort=order_date&order=desc`, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
-        if (SESSION?.token !== token || activeWsTab !== "fulfil") return;
-
-        const orders = data.orders || [];
-        panel.innerHTML = `
-            <h4>Fulfilment queue <span class="ws-count">${data.total ?? orders.length}</span></h4>
-            <p class="ws-note">Manage real parcels from the logistics database. Status changes are saved
-                to PostgreSQL and appear in the customer's tracking history.</p>
-            <div class="ws-fulfil-list">
-                ${orders.map(o => `
-                    <div class="ws-row ws-fulfil-row">
-                        <div>
-                            <strong>Order #${escapeHtml(o.order_id)}</strong>
-                            <span class="ws-sub">${escapeHtml(o.tracking_number || "No tracking number")}</span>
-                            <span class="ws-sub">${o.order_date ? new Date(o.order_date).toLocaleString() : ""}</span>
-                        </div>
-                        <span class="ws-amount">${Number(o.total_cost || 0).toFixed(2)} ₸</span>
-                        <span class="status-pill" data-status="${escapeHtml(o.status)}">${escapeHtml(o.status)}</span>
-                        ${o.tracking_number ? `
-                            <select class="ws-select" data-status-for="${escapeHtml(o.tracking_number)}">
-                                ${["Created", "In Transit", "At Depot", "Delivered", "Cancelled"].map(s =>
-                                    `<option value="${s}"${s === o.status ? " selected" : ""}>${s}</option>`
-                                ).join("")}
-                            </select>
-                            <button class="ws-link" data-save-status="${escapeHtml(o.tracking_number)}">Save</button>
-                            <button class="ws-link" data-track="${escapeHtml(o.tracking_number)}">Track</button>
-                        ` : `<span class="ws-sub">No parcel tracking record</span>`}
-                    </div>
-                `).join("") || '<p class="ws-empty">No database orders found.</p>'}
-            </div>`;
-    } catch (error) {
-        if (SESSION?.token === token && activeWsTab === "fulfil") {
-            panel.innerHTML = `<h4>Fulfilment queue</h4><p class="ws-empty">Failed to load parcels: ${escapeHtml(error.message)}</p>`;
-        }
-        console.error("Fulfilment queue error:", error);
-    }
-}
-
 function renderWorkspace() {
     const locked = document.getElementById("wsLocked");
     const signed = document.getElementById("wsSignedIn");
@@ -1128,7 +1079,15 @@ async function renderWsPanel(tab) {
     }
 
     if (tab === "fulfil") {
-        await renderFulfilmentQueue();
+        panel.innerHTML = `
+            <h4>Fulfilment queue</h4>
+            <p class="ws-note">Advance a parcel along the delivery lifecycle. Each change writes a
+                tracking event and is guarded by <code>orders:update:status</code>.</p>
+            ${wsOrderRows(ORDERS, o => `
+                <select class="ws-select" data-status-for="${o.order_id}">
+                    ${LIFECYCLE.map(s => `<option${s === o.order_status ? " selected" : ""}>${s}</option>`).join("")}
+                </select>
+                <button class="ws-link" data-save-status="${o.order_id}">Save</button>`)}`;
         return;
     }
 
@@ -1230,24 +1189,13 @@ document.getElementById("wsPanel").addEventListener("click", async e => {
     /* Protected: orders:update:status */
     const saveStatus = e.target.closest("[data-save-status]");
     if (saveStatus) {
-        const trackingNumber = saveStatus.dataset.saveStatus;
-        const select = document.querySelector(`[data-status-for="${trackingNumber}"]`);
-        if (!select) return;
-        saveStatus.disabled = true;
-        saveStatus.textContent = "Saving...";
-        try {
-            const result = await Auth.fetch(
-                `/api/tracking/${encodeURIComponent(trackingNumber)}/status`,
-                { method: "PATCH", body: { status: select.value }, token: SESSION?.token }
-            );
-            if (!result.ok) throw new Error(result.data?.message || result.error || `HTTP ${result.status}`);
-            toast(`Order #${result.data.order_id} → ${result.data.status}`);
-            await renderFulfilmentQueue();
-        } catch (error) {
-            toast(`Could not update status: ${error.message}`);
-            saveStatus.disabled = false;
-            saveStatus.textContent = "Save";
-        }
+        const id = saveStatus.dataset.saveStatus;
+        const guard = await Auth.requireAuth("orders:update:status")(SESSION?.token);
+        if (!guard.ok) return toast(`403 · ${guard.error}`);
+        const select = document.querySelector(`[data-status-for="${id}"]`);
+        updateOrderStatus(id, select.value, `Status set to "${select.value}" by ${guard.user.name}.`);
+        toast(`${id} → ${select.value}`);
+        renderWorkspace();
         return;
     }
 
