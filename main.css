@@ -1896,3 +1896,35 @@ img {
 .delivery-confirmed code { display:inline-block; margin:8px 0; padding:6px 9px; border-radius:7px; background:#fff; color:#202a3a; font-weight:700; }
 @media (max-width:850px) { .delivery-layout { grid-template-columns:1fr; } }
 @media (max-width:560px) { .delivery-card { padding:17px; } .delivery-address-grid { grid-template-columns:1fr; gap:0; } .delivery-details-grid { grid-template-columns:1fr 1fr; } .delivery-option-grid { grid-template-columns:1fr 1fr; } }
+
+/* Week 10 — parcel document management */
+.parcel-files-panel {
+    max-width: var(--maxw);
+    margin: 1.25rem auto 0;
+    padding: 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.parcel-files-head { display:flex; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+.parcel-files-head p, .parcel-file-row small, .parcel-upload-form small { color:var(--text-muted); font-size:.8rem; display:block; }
+.parcel-upload-form { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; padding:1rem; background:var(--bg); border:1px dashed var(--border); border-radius:var(--radius-sm); }
+.parcel-upload-form input { max-width:100%; }
+.parcel-upload-form small { flex-basis:100%; }
+.parcel-file-list { display:grid; gap:.5rem; margin-top:1rem; }
+.parcel-file-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.8rem; border:1px solid var(--border); border-radius:var(--radius-sm); }
+.parcel-file-feedback { margin-top:.6rem; color:var(--red); font-size:.85rem; }
+
+/* Week 11 — administrator analytics */
+.analytics-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; }
+.analytics-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:.75rem; margin:1rem 0; }
+.analytics-kpi, .analytics-card { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; }
+.analytics-kpi span { display:block; color:var(--text-muted); font-size:.78rem; }
+.analytics-kpi strong { display:block; font-size:1.45rem; margin-top:.2rem; }
+.analytics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:.8rem; margin-bottom:.8rem; }
+.analytics-card h5 { font-size:.95rem; margin-bottom:.8rem; }
+.analytics-bar-row { display:grid; grid-template-columns: minmax(75px, auto) 1fr 30px; align-items:center; gap:.55rem; margin:.65rem 0; font-size:.78rem; }
+.analytics-bar-track { height:9px; background:var(--border); border-radius:99px; overflow:hidden; }
+.analytics-bar-track i { display:block; height:100%; background:var(--accent); border-radius:99px; }
+.analytics-top { margin-top:.8rem; }
+@media(max-width:600px) { .parcel-file-row { align-items:flex-start; flex-direction:column; } .analytics-head { align-items:flex-start; } }
