@@ -1033,7 +1033,7 @@ async function renderDatabaseOrders(tab) {
                         </div>
 
                         <span class="ws-amount">
-                            ${Number(o.total_cost ?? 0).toFixed(2)} ₸
+                            ${o.total_cost == null ? "Not priced" : `${Number(o.total_cost).toFixed(2)} ₸`}
                         </span>
 
                         <span class="status-pill"
