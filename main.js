@@ -911,6 +911,7 @@ function workspaceTabs(role) {
     if (Auth.can(role, "orders:read:own")) tabs.push({ id: "my-orders", label: "My orders" });
     if (Auth.can(role, "orders:read:all")) tabs.push({ id: "all-orders", label: "All orders" });
     if (Auth.can(role, "orders:update:status")) tabs.push({ id: "fulfil", label: "Fulfilment" });
+    if (Auth.can(role, "routes:manage")) tabs.push({ id: "routes", label: "Route Management" });
     if (Auth.can(role, "users:read")) {
         tabs.push({ id: "analytics", label: "Analytics" });
         tabs.push({ id: "users", label: "Users & roles" });
@@ -1243,6 +1244,74 @@ async function renderAdminAnalytics() {
     }
 }
 
+
+function localDateTimeValue(date) {
+    const pad = n => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function renderRouteManagement() {
+    const panel = document.getElementById("wsPanel");
+    const token = SESSION?.token;
+    panel.innerHTML = '<h4>Route Management</h4><p class="ws-empty">Loading routes and available resources…</p>';
+    try {
+        const headers = { Authorization: `Bearer ${token}` };
+        const [resourcesResponse, routesResponse] = await Promise.all([
+            fetch(`${Auth.API_BASE}/api/routes/available-resources`, { headers }),
+            fetch(`${Auth.API_BASE}/api/routes`, { headers })
+        ]);
+        const resourcesData = await resourcesResponse.json().catch(() => ({}));
+        const routesData = await routesResponse.json().catch(() => ({}));
+        if (!resourcesResponse.ok) throw new Error(resourcesData.message || `Resources HTTP ${resourcesResponse.status}`);
+        if (!routesResponse.ok) throw new Error(routesData.message || `Routes HTTP ${routesResponse.status}`);
+        if (SESSION?.token !== token || activeWsTab !== "routes") return;
+
+        const drivers = resourcesData.drivers || [];
+        const depots = resourcesData.depots || [];
+        const routes = routesData.routes || [];
+        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        tomorrow.setHours(9, 0, 0, 0);
+        const driverOptions = drivers.map(d => `<option value="${Number(d.driver_id)}" data-vehicle="${Number(d.vehicle_id)}">${escapeHtml(`${d.first_name} ${d.last_name}`)} — ${escapeHtml(d.plate_number)} (${Number(d.capacity_kg)} kg)</option>`).join("");
+        const depotOptionsFrom = depots.map((d, i) => `<option value="${Number(d.depot_id)}" ${i === 0 ? "selected" : ""}>${escapeHtml(`${d.city} — ${d.name}`)}</option>`).join("");
+        const depotOptionsTo = depots.map((d, i) => `<option value="${Number(d.depot_id)}" ${i === 1 ? "selected" : ""}>${escapeHtml(`${d.city} — ${d.name}`)}</option>`).join("");
+        const routeRows = routes.map(r => `
+          <tr>
+            <td>#${Number(r.route_id)}</td>
+            <td>${escapeHtml(`${r.first_name} ${r.last_name}`)}<small>${escapeHtml(r.plate_number)} · ${Number(r.capacity_kg)} kg</small></td>
+            <td>${escapeHtml(r.from_city || "—")} → ${escapeHtml(r.to_city || "—")}</td>
+            <td>${escapeHtml(new Date(r.departure_time).toLocaleString())}</td>
+            <td><span class="route-status" data-status="${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
+            <td>${r.status === "Planned" ? `<button class="ws-link" type="button" data-cancel-route="${Number(r.route_id)}">Cancel</button>` : "—"}</td>
+          </tr>`).join("");
+
+        panel.innerHTML = `
+          <div class="route-management-head"><div><h4>Route Management</h4><p class="ws-note">Create shared delivery routes. Customers can select routes that match their requests.</p></div><button type="button" class="ws-link" id="refreshRoutes">Refresh</button></div>
+          <section class="route-form-card">
+            <h5>Create route</h5>
+            ${drivers.length && depots.length >= 2 ? `
+              <form id="createRouteForm" class="route-form">
+                <label>Available driver and vehicle
+                  <select name="driver_id" id="routeDriver" required>${driverOptions}</select>
+                </label>
+                <label>Pickup depot<select name="from_depot_id" required>${depotOptionsFrom}</select></label>
+                <label>Delivery depot<select name="to_depot_id" required>${depotOptionsTo}</select></label>
+                <label>Departure date and time<input name="departure_time" type="datetime-local" min="${escapeHtml(localDateTimeValue(new Date()))}" value="${escapeHtml(localDateTimeValue(tomorrow))}" required></label>
+                <label>Distance (km)<input name="distance_km" type="number" min="1" step="0.1" value="200" required></label>
+                <div class="route-form-actions"><button class="btn btn-primary" type="submit">Create planned route</button><span id="routeFormFeedback" role="status"></span></div>
+              </form>` : `<p class="ws-empty">${drivers.length ? "Create at least two depots before adding a route." : "No drivers with an available vehicle and no upcoming route are currently available."}</p>`}
+          </section>
+          <section class="route-list-card"><h5>Existing routes (${routes.length})</h5>
+            ${routes.length ? `<div class="route-table-wrap"><table class="route-table"><thead><tr><th>ID</th><th>Driver / Vehicle</th><th>Direction</th><th>Departure</th><th>Status</th><th>Action</th></tr></thead><tbody>${routeRows}</tbody></table></div>` : '<p class="ws-empty">No routes found.</p>'}
+          </section>`;
+
+        document.getElementById("refreshRoutes")?.addEventListener("click", renderRouteManagement);
+    } catch (error) {
+        if (SESSION?.token === token && activeWsTab === "routes") {
+            panel.innerHTML = `<h4>Route Management</h4><p class="ws-empty">${escapeHtml(error.message)}</p>`;
+        }
+    }
+}
+
 async function renderWsPanel(tab) {
     const panel = document.getElementById("wsPanel");
     const u = SESSION.user;
@@ -1258,6 +1327,10 @@ async function renderWsPanel(tab) {
     }
     if (tab === "analytics") {
         await renderAdminAnalytics();
+        return;
+    }
+    if (tab === "routes") {
+        await renderRouteManagement();
         return;
     }
 
@@ -1347,7 +1420,63 @@ document.getElementById("wsTabs").addEventListener("click", e => {
     renderWorkspace();
 });
 
+
+document.getElementById("wsPanel").addEventListener("submit", async e => {
+    if (e.target.id !== "createRouteForm") return;
+    e.preventDefault();
+    const form = e.target;
+    const feedback = document.getElementById("routeFormFeedback");
+    const submitButton = form.querySelector('button[type="submit"]');
+    const driverSelect = form.elements.driver_id;
+    const selectedDriverOption = driverSelect.selectedOptions[0];
+    const payload = {
+        driver_id: Number(driverSelect.value),
+        vehicle_id: Number(selectedDriverOption?.dataset.vehicle),
+        from_depot_id: Number(form.elements.from_depot_id.value),
+        to_depot_id: Number(form.elements.to_depot_id.value),
+        departure_time: form.elements.departure_time.value,
+        distance_km: Number(form.elements.distance_km.value)
+    };
+    submitButton.disabled = true;
+    feedback.textContent = "Creating route…";
+    feedback.className = "route-feedback";
+    try {
+        const response = await fetch(`${Auth.API_BASE}/api/routes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SESSION?.token}` },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+        toast(`Route #${data.route.route_id} created`);
+        await renderRouteManagement();
+    } catch (error) {
+        feedback.textContent = error.message;
+        feedback.className = "route-feedback error";
+        submitButton.disabled = false;
+    }
+});
+
 document.getElementById("wsPanel").addEventListener("click", async e => {
+    const cancelRouteButton = e.target.closest("[data-cancel-route]");
+    if (cancelRouteButton) {
+        const routeId = cancelRouteButton.dataset.cancelRoute;
+        if (!confirm(`Cancel planned route #${routeId}?`)) return;
+        cancelRouteButton.disabled = true;
+        try {
+            const response = await fetch(`${Auth.API_BASE}/api/routes/${encodeURIComponent(routeId)}/cancel`, {
+                method: "PATCH", headers: { Authorization: `Bearer ${SESSION?.token}` }
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+            toast(`Route #${routeId} cancelled`);
+            await renderRouteManagement();
+        } catch (error) {
+            toast(`Could not cancel route: ${error.message}`);
+            cancelRouteButton.disabled = false;
+        }
+        return;
+    }
     const trackBtn = e.target.closest("[data-track]");
     if (trackBtn) {
         document.getElementById("orderInput").value = trackBtn.dataset.track;
