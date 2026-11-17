@@ -1915,7 +1915,7 @@ img {
 .parcel-file-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.8rem; border:1px solid var(--border); border-radius:var(--radius-sm); }
 .parcel-file-feedback { margin-top:.6rem; color:var(--red); font-size:.85rem; }
 
-/* Week 11 — administrator analytics */
+/* Week 11 — administrator analytics */ 
 .analytics-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; }
 .analytics-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:.75rem; margin:1rem 0; }
 .analytics-kpi, .analytics-card { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; }
