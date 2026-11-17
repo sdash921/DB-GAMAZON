@@ -1915,7 +1915,7 @@ img {
 .parcel-file-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.8rem; border:1px solid var(--border); border-radius:var(--radius-sm); }
 .parcel-file-feedback { margin-top:.6rem; color:var(--red); font-size:.85rem; }
 
-/* Week 11 — administrator analytics */ 
+/* Week 11 — administrator analytics */
 .analytics-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; }
 .analytics-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:.75rem; margin:1rem 0; }
 .analytics-kpi, .analytics-card { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; }
@@ -1928,3 +1928,23 @@ img {
 .analytics-bar-track i { display:block; height:100%; background:var(--accent); border-radius:99px; }
 .analytics-top { margin-top:.8rem; }
 @media(max-width:600px) { .parcel-file-row { align-items:flex-start; flex-direction:column; } .analytics-head { align-items:flex-start; } }
+
+/* Shared route management — Manager/Admin workspace */
+.route-management-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; }
+.route-form-card,.route-list-card { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; margin-top:1rem; }
+.route-form-card h5,.route-list-card h5 { margin:0 0 .85rem; font-size:.98rem; }
+.route-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.85rem; }
+.route-form label { display:flex; flex-direction:column; gap:.35rem; font-size:.82rem; font-weight:650; }
+.route-form input,.route-form select { min-width:0; width:100%; padding:.65rem .7rem; border:1px solid var(--border); border-radius:9px; background:var(--surface); color:var(--text); font:inherit; }
+.route-form-actions { display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; grid-column:1/-1; }
+.route-feedback { color:var(--text-muted); font-size:.82rem; }
+.route-feedback.error { color:var(--red); }
+.route-table-wrap { overflow-x:auto; }
+.route-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.route-table th,.route-table td { text-align:left; padding:.7rem .55rem; border-bottom:1px solid var(--border); white-space:nowrap; }
+.route-table th { color:var(--text-muted); font-weight:650; }
+.route-table td small { display:block; color:var(--text-muted); margin-top:.2rem; }
+.route-status { display:inline-block; border:1px solid var(--border); border-radius:999px; padding:.25rem .55rem; font-size:.75rem; }
+.route-status[data-status="Planned"] { color:#18845a; background:#eaf8f1; border-color:#bde8d2; }
+.route-status[data-status="Assigned"] { color:#946200; background:#fff7df; border-color:#f0dfa9; }
+@media(max-width:600px) { .route-form-actions { align-items:flex-start; flex-direction:column; } }
