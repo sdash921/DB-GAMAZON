@@ -525,6 +525,63 @@ function showTrackingPlaceholder(message) {
     timelineEl.innerHTML = `<div class="tl-empty">${message}</div>`;
 }
 
+async function renderParcelFiles(trackingNumber) {
+    const panel = document.getElementById("parcelFilesPanel");
+    if (!panel || !SESSION?.token) { if (panel) panel.hidden = true; return; }
+    panel.hidden = false;
+    panel.dataset.trackingNumber = trackingNumber;
+    panel.innerHTML = '<h3>Parcel documents</h3><p class="ws-empty">Loading files…</p>';
+    try {
+        const response = await fetch(`${Auth.API_BASE}/api/files/parcel/${encodeURIComponent(trackingNumber)}`, {
+            headers: { Authorization: `Bearer ${SESSION.token}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+        const files = data.files || [];
+        panel.innerHTML = `
+          <div class="parcel-files-head"><div><h3>Parcel documents</h3><p>Upload and download documents attached to this parcel.</p></div></div>
+          <form id="parcelUploadForm" class="parcel-upload-form">
+            <input id="parcelFileInput" type="file" name="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" required>
+            <button class="btn btn-primary" type="submit">Upload file</button>
+            <small>PDF, JPG, PNG or WEBP · Maximum 5 MB</small>
+          </form>
+          <div class="parcel-file-list">${files.map(file => `<div class="parcel-file-row"><div><strong>${escapeHtml(file.original_name)}</strong><small>${escapeHtml(file.mime_type)} · ${(Number(file.size_bytes)/1024).toFixed(1)} KB · ${new Date(file.created_at).toLocaleString()}</small></div><button type="button" class="ws-link" data-download-file="${Number(file.file_id)}">Download</button></div>`).join("") || '<p class="ws-empty">No documents uploaded for this parcel.</p>'}</div>
+          <p class="parcel-file-feedback" id="parcelFileFeedback" role="status"></p>`;
+        document.getElementById("parcelUploadForm").addEventListener("submit", async event => {
+            event.preventDefault();
+            const input = document.getElementById("parcelFileInput");
+            const feedback = document.getElementById("parcelFileFeedback");
+            const file = input.files?.[0];
+            if (!file) return;
+            if (file.size > 5 * 1024 * 1024) { feedback.textContent = "File exceeds the 5 MB limit."; return; }
+            const formData = new FormData(); formData.append("file", file);
+            const upload = await fetch(`${Auth.API_BASE}/api/files/parcel/${encodeURIComponent(trackingNumber)}`, {
+                method: "POST", headers: { Authorization: `Bearer ${SESSION.token}` }, body: formData
+            });
+            const result = await upload.json().catch(() => ({}));
+            if (!upload.ok) { feedback.textContent = result.message || `Upload failed (${upload.status})`; return; }
+            toast("File uploaded successfully");
+            await renderParcelFiles(trackingNumber);
+        });
+        panel.querySelectorAll("[data-download-file]").forEach(button => button.addEventListener("click", async () => {
+            button.disabled = true; button.textContent = "Downloading…";
+            try {
+                const download = await fetch(`${Auth.API_BASE}/api/files/${button.dataset.downloadFile}/download`, { headers: { Authorization: `Bearer ${SESSION.token}` } });
+                if (!download.ok) { const result = await download.json().catch(() => ({})); throw new Error(result.message || `HTTP ${download.status}`); }
+                const blob = await download.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a"); link.href = url;
+                const row = button.closest(".parcel-file-row");
+                link.download = row.querySelector("strong").textContent;
+                document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+            } catch (error) { toast(`Download failed: ${error.message}`); }
+            finally { button.disabled = false; button.textContent = "Download"; }
+        }));
+    } catch (error) {
+        panel.innerHTML = `<h3>Parcel documents</h3><p class="ws-empty">${escapeHtml(error.message)}</p>`;
+    }
+}
+
 async function trackOrder() {
     const id = orderInput.value.trim();
     if (!id) {
@@ -532,15 +589,9 @@ async function trackOrder() {
         return;
     }
 
-    // Preserve the original local storefront demo orders.
-    const localResult = getOrder(id);
-    if (localResult) {
-        renderMeta(localResult);
-        renderTimeline(localResult.events);
-        return;
-    }
-
-    // Real parcel tracking is loaded from PostgreSQL by tracking number.
+    // Prefer the real API so a local demo order can never shadow a database
+    // parcel with a matching input. Local demo orders are only a fallback for
+    // their explicit GA-* order IDs when the API reports not found.
     try {
         const data = await trackDelivery(id);
         const parcel = data.parcel || {};
@@ -571,8 +622,17 @@ async function trackOrder() {
             events.push({ title:data.current_status, time:"Latest status", desc:data.current_city || "Status recorded in the logistics system." });
         }
         renderTimeline(events);
+        await renderParcelFiles(data.tracking_number || id);
     } catch (error) {
+        const localResult = /^GA-/i.test(id) ? getOrder(id) : null;
+        if (localResult && /not found|404/i.test(error.message || "")) {
+            renderMeta(localResult);
+            renderTimeline(localResult.events);
+            document.getElementById("parcelFilesPanel").hidden = true;
+            return;
+        }
         metaEl.innerHTML = "";
+        document.getElementById("parcelFilesPanel").hidden = true;
         showTrackingPlaceholder(`We couldn't find parcel <strong>${escapeHtml(id)}</strong>. ${escapeHtml(error.message || "Check the tracking number and try again.")}`);
     }
 }
@@ -851,7 +911,10 @@ function workspaceTabs(role) {
     if (Auth.can(role, "orders:read:own")) tabs.push({ id: "my-orders", label: "My orders" });
     if (Auth.can(role, "orders:read:all")) tabs.push({ id: "all-orders", label: "All orders" });
     if (Auth.can(role, "orders:update:status")) tabs.push({ id: "fulfil", label: "Fulfilment" });
-    if (Auth.can(role, "users:read")) tabs.push({ id: "users", label: "Users & roles" });
+    if (Auth.can(role, "users:read")) {
+        tabs.push({ id: "analytics", label: "Analytics" });
+        tabs.push({ id: "users", label: "Users & roles" });
+    }
     if (Auth.can(role, "audit:read")) tabs.push({ id: "audit", label: "Audit log" });
     tabs.push({ id: "security", label: "My security" });
     return tabs;
@@ -1132,6 +1195,54 @@ function renderWorkspace() {
     renderWsPanel(activeWsTab);
 }
 
+async function renderAdminAnalytics() {
+    const panel = document.getElementById("wsPanel");
+    const token = SESSION?.token;
+    panel.innerHTML = '<h4>Analytics dashboard</h4><p>Loading analytics…</p>';
+    try {
+        const response = await fetch(`${Auth.API_BASE}/api/admin/dashboard`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+        if (SESSION?.token !== token || activeWsTab !== "analytics") return;
+        const totals = data.totals || {};
+        const maxDaily = Math.max(1, ...(data.orders_last_7_days || []).map(x => Number(x.count)));
+        const maxStatus = Math.max(1, ...(data.orders_by_status || []).map(x => Number(x.count)));
+        panel.innerHTML = `
+          <div class="analytics-head"><div><h4>Analytics dashboard</h4><p class="ws-note">Generated ${escapeHtml(new Date(data.generated_at).toLocaleString())}</p></div>
+            <button class="ws-link" id="exportOrdersCsv">Export orders CSV</button></div>
+          <div class="analytics-kpis">
+            <article class="analytics-kpi"><span>Total orders</span><strong>${Number(totals.total_orders || 0).toLocaleString()}</strong></article>
+            <article class="analytics-kpi"><span>Customers</span><strong>${Number(totals.total_customers || 0).toLocaleString()}</strong></article>
+            <article class="analytics-kpi"><span>Parcels</span><strong>${Number(totals.total_parcels || 0).toLocaleString()}</strong></article>
+            <article class="analytics-kpi"><span>Delivered</span><strong>${Number(totals.delivered_parcels || 0).toLocaleString()}</strong></article>
+            <article class="analytics-kpi"><span>Total order value</span><strong>${Number(totals.total_revenue || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} ₸</strong></article>
+          </div>
+          <div class="analytics-grid">
+            <section class="analytics-card"><h5>Orders by status</h5>
+              ${(data.orders_by_status || []).map(row => `<div class="analytics-bar-row"><span>${escapeHtml(row.status)}</span><div class="analytics-bar-track"><i style="width:${Math.min(100,Number(row.count)/maxStatus*100)}%"></i></div><b>${Number(row.count)}</b></div>`).join("") || '<p class="ws-empty">No orders yet.</p>'}
+            </section>
+            <section class="analytics-card"><h5>Orders — last 7 days</h5>
+              ${(data.orders_last_7_days || []).map(row => `<div class="analytics-bar-row"><span>${new Date(row.date).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</span><div class="analytics-bar-track"><i style="width:${Math.min(100,Number(row.count)/maxDaily*100)}%"></i></div><b>${Number(row.count)}</b></div>`).join("")}
+            </section>
+          </div>
+          <section class="analytics-card analytics-top"><h5>Top customers</h5><div class="ws-table">
+            ${(data.top_customers || []).map(c => `<div class="ws-row"><div><strong>${escapeHtml(`${c.first_name} ${c.last_name}`)}</strong><span class="ws-sub">${escapeHtml(c.email)}</span></div><span>${Number(c.orders_count)} orders</span><b>${Number(c.total_spent || 0).toFixed(2)} ₸</b></div>`).join("") || '<p class="ws-empty">No customers found.</p>'}
+          </div></section>`;
+        document.getElementById("exportOrdersCsv").addEventListener("click", async () => {
+            const exportResponse = await fetch(`${Auth.API_BASE}/api/admin/reports/orders.csv`, { headers: { Authorization: `Bearer ${token}` } });
+            if (!exportResponse.ok) { toast(`Export failed: HTTP ${exportResponse.status}`); return; }
+            const blob = await exportResponse.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a"); link.href = url; link.download = "gamazon-orders-report.csv";
+            document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+        });
+    } catch (error) {
+        if (SESSION?.token === token && activeWsTab === "analytics") panel.innerHTML = `<h4>Analytics dashboard</h4><p class="ws-empty">${escapeHtml(error.message)}</p>`;
+    }
+}
+
 async function renderWsPanel(tab) {
     const panel = document.getElementById("wsPanel");
     const u = SESSION.user;
@@ -1143,6 +1254,10 @@ async function renderWsPanel(tab) {
 
     if (tab === "fulfil") {
         await renderFulfilmentQueue();
+        return;
+    }
+    if (tab === "analytics") {
+        await renderAdminAnalytics();
         return;
     }
 
