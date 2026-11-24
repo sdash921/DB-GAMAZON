@@ -1962,3 +1962,8 @@ img {
 
 .route-map-point-controls { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
 .route-map-point-controls .is-active { border-color:var(--primary, #2456d8); background:rgba(36,86,216,.10); color:var(--primary, #2456d8); }
+
+/* Courier creation form layout */
+.route-form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.85rem; grid-column:1/-1; }
+.route-form-grid label { display:flex; flex-direction:column; gap:.35rem; font-size:.82rem; font-weight:650; }
+.route-form-grid input { min-width:0; width:100%; padding:.65rem .7rem; border:1px solid var(--border); border-radius:9px; background:var(--surface); color:var(--text); font:inherit; }
