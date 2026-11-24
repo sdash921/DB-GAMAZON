@@ -35,6 +35,25 @@
             : "Режим выбора доставки: нажмите на карту в месте получения посылки.";
     }
 
+    function updateDeliveryModeHint() {
+        const hint = document.getElementById("deliveryModeHint");
+        if (!hint) return;
+        const normalize = value => {
+            const key = String(value || "").trim().toLocaleLowerCase("ru").replace(/\\s+/g, " ");
+            const aliases = { "алматы":"almaty", "алма-ата":"almaty", "астана":"astana", "нур-султан":"astana", "караганда":"karaganda", "шымкент":"shymkent" };
+            return aliases[key] || key;
+        };
+        const pickupCity = normalize(fields("pickup_city").value);
+        const deliveryCity = normalize(fields("delivery_city").value);
+        if (!pickupCity || !deliveryCity) {
+            hint.textContent = "Укажите оба города: режим доставки определится автоматически.";
+        } else if (pickupCity === deliveryCity) {
+            hint.textContent = "Городская доставка: адрес → адрес внутри одного города. Междугородний маршрут и депо не нужны.";
+        } else {
+            hint.textContent = "Междугородняя доставка: потребуется подходящий маршрут между депо.";
+        }
+    }
+
     function removeRoutePreview() {
         if (routeLayer) map.removeLayer(routeLayer);
         routeLayer = null;
@@ -81,6 +100,7 @@
         if (city) fields(`${kind}_city`).value = city;
         fields(`${kind}_street`).value = street;
         fields(`${kind}_building`).value = building;
+        updateDeliveryModeHint();
         const label = [street, address.house_number, city].filter(Boolean).join(", ") || "Точка на карте";
         const marker = kind === "pickup" ? pickupMarker : deliveryMarker;
         if (marker) marker.setPopupContent(`${kind === "pickup" ? "Отправление" : "Доставка"}: ${escapeText(label)}`);
@@ -199,7 +219,7 @@
     // Editing an address manually invalidates its old pin, preventing mismatched coordinates.
     ["pickup", "delivery"].forEach(kind => {
         ["city", "street", "building"].forEach(part => {
-            fields(`${kind}_${part}`).addEventListener("input", () => clearPoint(kind));
+            fields(`${kind}_${part}`).addEventListener("input", () => { clearPoint(kind); updateDeliveryModeHint(); });
         });
     });
 
@@ -208,6 +228,7 @@
         if (input && !input.value) input.value = "Almaty";
     });
     setActivePoint("pickup");
+    updateDeliveryModeHint();
     setTimeout(() => map.invalidateSize(), 250);
     window.addEventListener("resize", () => map.invalidateSize());
     window.GAmazonRouteMap = { buildRoute, setActivePoint };
