@@ -130,6 +130,7 @@
                             <label>Building<input name="pickup_building" required placeholder="10"></label>
                             <label>Apartment <span class="optional">(optional)</span><input name="pickup_apartment" placeholder="25"></label>
                         </div>
+                        <div class="address-suggestions" id="pickupAddressSuggestions" role="listbox" aria-label="Pickup address suggestions" hidden></div>
                     </fieldset>
                     <fieldset>
                         <legend>Delivery address</legend>
@@ -139,18 +140,19 @@
                             <label>Building<input name="delivery_building" required placeholder="25"></label>
                             <label>Apartment <span class="optional">(optional)</span><input name="delivery_apartment" placeholder="12"></label>
                         </div>
+                        <div class="address-suggestions" id="deliveryAddressSuggestions" role="listbox" aria-label="Delivery address suggestions" hidden></div>
                     </fieldset>
                 </div>
                 <div class="route-map-panel">
                     <div class="route-map-heading">
-                        <div><strong>Route preview — Almaty and other cities</strong><p>Enter both addresses, then click “Build route”. You can also select points directly on the map.</p></div>
-                        <button class="btn btn-ghost" id="buildRoutePreview" type="button">Build route</button>
+                        <div><strong>Предварительный маршрут — Алматы и другие города</strong><p>Введите адреса на русском или английском, выберите подсказку. Также можно выбрать точки прямо на карте.</p></div>
+                        <button class="btn btn-ghost" id="buildRoutePreview" type="button">Построить маршрут</button>
                     </div>
                     <div id="deliveryMap" role="application" aria-label="Delivery route map"></div>
                     <div class="route-map-summary" id="routeMapSummary" aria-live="polite">
-                        <span>Route distance: —</span><span>Estimated time: —</span><span>Weather: —</span>
+                        <span>Расстояние: —</span><span>Время в пути: —</span><span>Погода: —</span>
                     </div>
-                    <p class="route-map-note" id="routeMapNote">Map route is a preliminary navigation estimate. The final delivery time may differ because of traffic, stops and courier availability.</p>
+                    <p class="route-map-note" id="routeMapNote">Маршрут и время являются предварительной оценкой. Фактическое время зависит от пробок, остановок и доступности курьера.</p>
                     <input type="hidden" name="pickup_lat">
                     <input type="hidden" name="pickup_lon">
                     <input type="hidden" name="delivery_lat">
