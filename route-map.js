@@ -1,5 +1,4 @@
-/* GAmazon map preview: Leaflet + OpenStreetMap + OSRM + Open-Meteo.
-   This is a planning estimate, not live traffic telemetry. */
+/* GAmazon map preview: address <-> map synchronization, OSRM roads and Open-Meteo estimate. */
 (function initRouteMap() {
     const mapElement = document.getElementById("deliveryMap");
     const form = document.getElementById("deliveryRequestForm");
@@ -15,130 +14,118 @@
     const summary = document.getElementById("routeMapSummary");
     const note = document.getElementById("routeMapNote");
     const buildButton = document.getElementById("buildRoutePreview");
+    const pickupButton = document.getElementById("selectPickupPoint");
+    const deliveryButton = document.getElementById("selectDeliveryPoint");
     let pickupMarker = null, deliveryMarker = null, routeLayer = null;
-    let nextMapPoint = "pickup";
-    const selectedAddress = { pickup: null, delivery: null };
-    const suggestionTimers = { pickup: null, delivery: null };
+    let activePoint = "pickup";
+    const coords = { pickup: null, delivery: null };
 
-    const coords = {
-        pickup: null,
-        delivery: null
-    };
     const escapeText = value => String(value).replace(/[&<>"']/g, ch => ({
-        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+        "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
     })[ch]);
+
+    function setActivePoint(kind) {
+        activePoint = kind;
+        pickupButton.classList.toggle("is-active", kind === "pickup");
+        deliveryButton.classList.toggle("is-active", kind === "delivery");
+        pickupButton.setAttribute("aria-pressed", String(kind === "pickup"));
+        deliveryButton.setAttribute("aria-pressed", String(kind === "delivery"));
+        note.textContent = kind === "pickup"
+            ? "Режим выбора отправления: нажмите на карту в месте забора посылки."
+            : "Режим выбора доставки: нажмите на карту в месте получения посылки.";
+    }
+
+    function removeRoutePreview() {
+        if (routeLayer) map.removeLayer(routeLayer);
+        routeLayer = null;
+        fields("route_distance_km").value = "";
+        fields("route_duration_min").value = "";
+        fields("weather_factor").value = "";
+        summary.textContent = "Маршрут ещё не построен.";
+    }
 
     function setPoint(kind, lat, lon, label) {
         coords[kind] = { lat: Number(lat), lon: Number(lon) };
-        const marker = kind === "pickup" ? pickupMarker : deliveryMarker;
-        if (marker) map.removeLayer(marker);
-        const title = kind === "pickup" ? "Pickup" : "Delivery";
-        const next = L.marker([lat, lon]).addTo(map).bindPopup(`${title}: ${escapeText(label || "Selected point")}`);
-        if (kind === "pickup") pickupMarker = next;
-        else deliveryMarker = next;
+        const oldMarker = kind === "pickup" ? pickupMarker : deliveryMarker;
+        if (oldMarker) map.removeLayer(oldMarker);
+        const title = kind === "pickup" ? "Отправление" : "Доставка";
+        const marker = L.marker([lat, lon]).addTo(map).bindPopup(`${title}: ${escapeText(label || "Точка на карте")}`);
+        if (kind === "pickup") pickupMarker = marker;
+        else deliveryMarker = marker;
         fields(`${kind}_lat`).value = Number(lat).toFixed(7);
         fields(`${kind}_lon`).value = Number(lon).toFixed(7);
     }
 
-    function addressQuery(kind) {
-        const city = fields(`${kind}_city`).value.trim();
-        const street = fields(`${kind}_street`).value.trim();
-        const building = fields(`${kind}_building`).value.trim();
-        if (!city || !street || !building) return "";
-        return `${street} ${building}, ${city}, Казахстан`;
+    function clearPoint(kind) {
+        coords[kind] = null;
+        fields(`${kind}_lat`).value = "";
+        fields(`${kind}_lon`).value = "";
+        const marker = kind === "pickup" ? pickupMarker : deliveryMarker;
+        if (marker) map.removeLayer(marker);
+        if (kind === "pickup") pickupMarker = null;
+        else deliveryMarker = null;
+        removeRoutePreview();
     }
 
-    function renderSuggestions(kind, features) {
-        const panel = document.getElementById(`${kind}AddressSuggestions`);
-        if (!panel) return;
-        panel.replaceChildren();
-        if (!features.length) { panel.hidden = true; return; }
-        features.forEach(feature => {
-            const props = feature.properties || {};
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = "address-suggestion";
-            button.setAttribute("role", "option");
-            button.textContent = props.label || [props.name, props.street, props.housenumber, props.city].filter(Boolean).join(", ");
-            button.addEventListener("click", () => {
-                const streetValue = props.street || props.name || "";
-                const houseValue = props.housenumber || "";
-                if (streetValue) fields(`${kind}_street`).value = streetValue;
-                if (houseValue) fields(`${kind}_building`).value = houseValue;
-                if (props.city) fields(`${kind}_city`).value = props.city;
-                const [lon, lat] = feature.geometry.coordinates;
-                setPoint(kind, lat, lon, button.textContent);
-                selectedAddress[kind] = { query: addressQuery(kind), lat, lon, label: button.textContent };
-                panel.hidden = true;
-                note.textContent = `${kind === "pickup" ? "Адрес отправления" : "Адрес доставки"} выбран. Квартира и подъезд указываются отдельно и не влияют на координаты здания.`;
-            });
-            panel.appendChild(button);
-        });
-        panel.hidden = false;
-    }
-
-    async function searchAddressSuggestions(kind) {
-        const query = addressQuery(kind);
-        const panel = document.getElementById(`${kind}AddressSuggestions`);
-        if (!query || query.length < 5) { if (panel) panel.hidden = true; return; }
-        try {
-            const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lang=ru&lat=43.2383&lon=76.9455`;
-            const response = await fetch(url, { headers: { "Accept":"application/json" } });
-            if (!response.ok) throw new Error("Address suggestions unavailable");
-            const data = await response.json();
-            renderSuggestions(kind, (data.features || []).filter(item =>
-                item.geometry?.coordinates?.length === 2 &&
-                item.properties?.countrycode?.toLowerCase() === "kz"
-            ));
-        } catch (error) {
-            if (panel) panel.hidden = true;
-            console.warn("Address autocomplete:", error.message);
-        }
+    async function reverseGeocode(kind, lat, lon) {
+        note.textContent = "Определяем адрес выбранной точки…";
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=ru`;
+        const response = await fetch(url, { headers: { "Accept": "application/json" } });
+        if (!response.ok) throw new Error("Не удалось определить адрес. Координаты точки сохранены; заполните город вручную.");
+        const data = await response.json();
+        const address = data.address || {};
+        const city = address.city || address.town || address.village || address.municipality || address.county || "";
+        const street = address.road || address.pedestrian || address.residential || address.footway || "Выбрано на карте";
+        fields(`${kind}_city`).value = city;
+        const building = address.house_number || "Точка на карте";
+        if (city) fields(`${kind}_city`).value = city;
+        fields(`${kind}_street`).value = street;
+        fields(`${kind}_building`).value = building;
+        const label = [street, address.house_number, city].filter(Boolean).join(", ") || "Точка на карте";
+        const marker = kind === "pickup" ? pickupMarker : deliveryMarker;
+        if (marker) marker.setPopupContent(`${kind === "pickup" ? "Отправление" : "Доставка"}: ${escapeText(label)}`);
+        note.textContent = `${kind === "pickup" ? "Отправление" : "Доставка"}: ${label}. Координаты точки сохранены.`;
+        if (!city) note.textContent += " Город не распознан — укажите его в поле «Город».";
     }
 
     async function geocodeAddress(kind) {
-        const query = addressQuery(kind);
-        if (!query) throw new Error(`Заполните город, улицу и номер дома (${kind === "pickup" ? "отправление" : "доставка"}).`);
-        const selected = selectedAddress[kind];
-        if (selected && selected.query === query) return selected;
-
-        const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1&lang=ru&lat=43.2383&lon=76.9455`;
-        const photonResponse = await fetch(photonUrl, { headers: { "Accept":"application/json" } });
-        if (photonResponse.ok) {
-            const photonData = await photonResponse.json();
-            const feature = (photonData.features || []).find(item =>
-                item.geometry?.coordinates?.length === 2 &&
-                item.properties?.countrycode?.toLowerCase() === "kz"
-            );
-            if (feature) {
-                const [lon, lat] = feature.geometry.coordinates;
-                return { lat:Number(lat), lon:Number(lon), label:feature.properties.label || query };
-            }
-        }
-
-        const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=kz&accept-language=ru&q=${encodeURIComponent(query)}`;
-        const fallbackResponse = await fetch(fallbackUrl, { headers: { "Accept":"application/json" } });
-        if (!fallbackResponse.ok) throw new Error("Сервис поиска адресов временно недоступен.");
-        const results = await fallbackResponse.json();
-        if (!results.length) throw new Error(`Не удалось найти адрес: ${query}. Выберите подсказку или уточните улицу и дом.`);
+        const city = fields(`${kind}_city`).value.trim();
+        const street = fields(`${kind}_street`).value.trim();
+        const building = fields(`${kind}_building`).value.trim();
+        if (!city || !street || !building) throw new Error(`Для ${kind === "pickup" ? "отправления" : "доставки"} выберите точку на карте или заполните город, улицу и дом.`);
+        const query = `${building} ${street}, ${city}, Kazakhstan`;
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=kz&q=${encodeURIComponent(query)}`;
+        const response = await fetch(url, { headers: { "Accept":"application/json" } });
+        if (!response.ok) throw new Error("Сервис поиска адресов временно недоступен.");
+        const results = await response.json();
+        if (!results.length) throw new Error(`Адрес не найден: ${query}. Уточните улицу или выберите точку на карте.`);
         return { lat:Number(results[0].lat), lon:Number(results[0].lon), label:results[0].display_name };
+    }
+
+    async function resolvePoint(kind) {
+        const storedLat = fields(`${kind}_lat`).value;
+        const storedLon = fields(`${kind}_lon`).value;
+        if (coords[kind] && storedLat && storedLon) return { ...coords[kind], label:"Точка на карте" };
+        const point = await geocodeAddress(kind);
+        setPoint(kind, point.lat, point.lon, point.label);
+        return point;
     }
 
     async function getWeather(lat, lon) {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,precipitation,rain,snowfall,wind_speed_10m,weather_code&timezone=Asia%2FAlmaty`;
         const response = await fetch(url);
-        if (!response.ok) throw new Error("Weather service is unavailable.");
+        if (!response.ok) throw new Error("Сервис погоды временно недоступен.");
         const data = await response.json();
         return data.current || {};
     }
 
     function weatherDescription(current) {
         const code = Number(current.weather_code);
-        if (current.snowfall > 0 || [71,73,75,77,85,86].includes(code)) return "Snow";
-        if (current.precipitation > 0 || current.rain > 0 || [51,53,55,61,63,65,80,81,82].includes(code)) return "Rain";
-        if ([45,48].includes(code)) return "Fog";
-        if (current.wind_speed_10m >= 40) return "Strong wind";
-        return "No significant precipitation";
+        if (current.snowfall > 0 || [71,73,75,77,85,86].includes(code)) return "Снег";
+        if (current.precipitation > 0 || current.rain > 0 || [51,53,55,61,63,65,80,81,82].includes(code)) return "Дождь";
+        if ([45,48].includes(code)) return "Туман";
+        if (current.wind_speed_10m >= 40) return "Сильный ветер";
+        return "Без существенных осадков";
     }
 
     function weatherMultiplier(current) {
@@ -154,23 +141,19 @@
     async function buildRoute() {
         buildButton.disabled = true;
         buildButton.textContent = "Строим…";
-        summary.textContent = "Ищем адреса и рассчитываем маршрут…";
+        summary.textContent = "Получаем координаты и строим маршрут по дорогам…";
         try {
-            const pickup = await geocodeAddress("pickup");
-            setPoint("pickup", pickup.lat, pickup.lon, pickup.label);
-            await new Promise(resolve => setTimeout(resolve, 1100)); // respect Nominatim's public rate limit
-            const delivery = await geocodeAddress("delivery");
-            setPoint("delivery", delivery.lat, delivery.lon, delivery.label);
-
+            const pickup = await resolvePoint("pickup");
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            const delivery = await resolvePoint("delivery");
             const routeUrl = `https://router.project-osrm.org/route/v1/driving/${pickup.lon},${pickup.lat};${delivery.lon},${delivery.lat}?overview=full&geometries=geojson&steps=true`;
             const routeResponse = await fetch(routeUrl);
             if (!routeResponse.ok) throw new Error("Сервис построения маршрута временно недоступен.");
             const routeData = await routeResponse.json();
-            if (routeData.code !== "Ok" || !routeData.routes?.length) throw new Error("Автомобильный маршрут между адресами не найден.");
+            if (routeData.code !== "Ok" || !routeData.routes?.length) throw new Error("Автомобильный маршрут между этими точками не найден.");
             const route = routeData.routes[0];
             if (routeLayer) map.removeLayer(routeLayer);
             routeLayer = L.geoJSON(route.geometry, { style: { color:"#2456d8", weight:6, opacity:.85 } }).addTo(map);
-            const bounds = L.latLngBounds([ [pickup.lat,pickup.lon], [delivery.lat,delivery.lon] ]);
             map.fitBounds(routeLayer.getBounds().pad(0.15));
 
             const weather = await getWeather(delivery.lat, delivery.lon);
@@ -181,49 +164,51 @@
             fields("route_distance_km").value = distanceKm.toFixed(2);
             fields("route_duration_min").value = Math.round(baseMinutes);
             fields("weather_factor").value = factor.toFixed(2);
-            const weatherText = weatherDescription(weather);
-            summary.innerHTML = `
-                <span>Расстояние: ${distanceKm.toFixed(1)} км</span>
-                <span>Время по дорогам: ${Math.ceil(baseMinutes)} мин</span>
-                <span>Погода: ${escapeText(weatherText)} · ${Math.round(weather.temperature_2m)}°C</span>
-                <span>Оценка с погодой: ${adjustedMinutes} мин</span>`;
-            note.textContent = `Поправка на погоду: ${Math.round((factor - 1) * 100)}%. Это демонстрационная оценка, не данные о пробках. Погода проверяется рядом с адресом доставки.`;
-            fields("pickup_lat").dispatchEvent(new Event("change", { bubbles:true }));
+            summary.innerHTML = `<span>Расстояние: ${distanceKm.toFixed(1)} км</span><span>По дорогам: ${Math.ceil(baseMinutes)} мин</span><span>Погода: ${escapeText(weatherDescription(weather))} · ${Math.round(weather.temperature_2m)}°C</span><span>С учётом погоды: ${adjustedMinutes} мин</span>`;
+            note.textContent = "Маршрут рассчитан по дорожной сети. Поправка на погоду — демонстрационная оценка; данные о пробках в реальном времени не используются.";
         } catch (error) {
-            summary.textContent = error.message || "Could not calculate route.";
-            note.textContent = "Check the addresses and try again. You can also select approximate points directly on the map.";
+            summary.textContent = error.message || "Не удалось построить маршрут.";
         } finally {
             buildButton.disabled = false;
             buildButton.textContent = "Построить маршрут";
         }
     }
 
+    pickupButton.addEventListener("click", () => setActivePoint("pickup"));
+    deliveryButton.addEventListener("click", () => setActivePoint("delivery"));
     buildButton.addEventListener("click", buildRoute);
-    map.on("click", event => {
-        const kind = nextMapPoint;
-        setPoint(kind, event.latlng.lat, event.latlng.lng, "Map selection");
-        nextMapPoint = kind === "pickup" ? "delivery" : "pickup";
-        note.textContent = `Выбрана точка ${kind === "pickup" ? "отправления" : "доставки"}. Следующий клик выберет ${nextMapPoint === "pickup" ? "отправление" : "доставку"}. После выбора обеих точек нажмите «Построить маршрут».`;
+
+    map.on("click", async event => {
+        const kind = activePoint;
+        setPoint(kind, event.latlng.lat, event.latlng.lng, "Точка на карте");
+        // Keep the pin usable even if reverse-geocoding is temporarily unavailable.
+        fields(`${kind}_city`).value = "";
+        fields(`${kind}_street`).value = "Выбрано на карте";
+        fields(`${kind}_building`).value = "Точка на карте";
+        removeRoutePreview();
+        try {
+            await reverseGeocode(kind, event.latlng.lat, event.latlng.lng);
+        } catch (error) {
+            note.textContent = error.message;
+        }
+        // After setting pickup, automatically arm delivery mode for the next click.
+        if (kind === "pickup") setActivePoint("delivery");
+        else setActivePoint("pickup");
     });
 
-    // Russian/English address autocomplete with a short debounce.
+    // Editing an address manually invalidates its old pin, preventing mismatched coordinates.
     ["pickup", "delivery"].forEach(kind => {
         ["city", "street", "building"].forEach(part => {
-            const input = fields(`${kind}_${part}`);
-            input.addEventListener("input", () => {
-                selectedAddress[kind] = null;
-                clearTimeout(suggestionTimers[kind]);
-                suggestionTimers[kind] = setTimeout(() => searchAddressSuggestions(kind), 650);
-            });
+            fields(`${kind}_${part}`).addEventListener("input", () => clearPoint(kind));
         });
     });
 
-    // Default to Almaty for a local-delivery-first experience.
-    ["pickup_city","delivery_city"].forEach(name => {
+    ["pickup_city", "delivery_city"].forEach(name => {
         const input = fields(name);
         if (input && !input.value) input.value = "Almaty";
     });
+    setActivePoint("pickup");
     setTimeout(() => map.invalidateSize(), 250);
     window.addEventListener("resize", () => map.invalidateSize());
-    window.GAmazonRouteMap = { buildRoute };
+    window.GAmazonRouteMap = { buildRoute, setActivePoint };
 })();
