@@ -93,8 +93,21 @@ async function trackDelivery(trackingNumber) {
             const value = name => form.elements.namedItem(name).value.trim();
             const numberOrNull = name => value(name) ? Number(value(name)) : null;
             const payload = {
-                pickup: { city:value("pickup_city"), street:value("pickup_street"), building:value("pickup_building"), apartment:value("pickup_apartment") || null },
-                delivery: { city:value("delivery_city"), street:value("delivery_street"), building:value("delivery_building"), apartment:value("delivery_apartment") || null },
+                pickup: {
+                    city:value("pickup_city"), street:value("pickup_street"), building:value("pickup_building"),
+                    apartment:value("pickup_apartment") || null,
+                    latitude:numberOrNull("pickup_lat"), longitude:numberOrNull("pickup_lon")
+                },
+                delivery: {
+                    city:value("delivery_city"), street:value("delivery_street"), building:value("delivery_building"),
+                    apartment:value("delivery_apartment") || null,
+                    latitude:numberOrNull("delivery_lat"), longitude:numberOrNull("delivery_lon")
+                },
+                route_preview: {
+                    distance_km:numberOrNull("route_distance_km"),
+                    duration_min:numberOrNull("route_duration_min"),
+                    weather_factor:numberOrNull("weather_factor")
+                },
                 weight_kg:Number(value("weight_kg")),
                 length_cm:numberOrNull("length_cm"),
                 width_cm:numberOrNull("width_cm"),
