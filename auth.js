@@ -6,12 +6,14 @@ const API_BASE = window.GAMAZON_API_BASE || "http://localhost:3000";
 const ROLES = [
     { role_id: 1, role_name: "user" },
     { role_id: 2, role_name: "manager" },
-    { role_id: 3, role_name: "admin" }
+    { role_id: 3, role_name: "admin" },
+    { role_id: 4, role_name: "courier" }
 ];
 
 function toUiRole(dbRole) {
     const map = {
         customer: "user",
+        courier: "courier",
         manager: "manager",
         admin: "admin",
         user: "user"
@@ -30,6 +32,7 @@ function toDbRole(uiRole) {
 }
 
 const ROLE_INFO = {
+    courier: { label: "Courier", icon: "🚴", blurb: "View and update your assigned deliveries." },
     user: {
         label: "Customer",
         icon: "🛍️",
@@ -49,6 +52,7 @@ const ROLE_INFO = {
 
 const PERMISSIONS = {
     "products:read": ["user", "manager", "admin"],
+    "courier:deliveries": ["courier"],
     "cart:manage": ["user", "manager", "admin"],
     "orders:create": ["user", "manager", "admin"],
     "orders:read:own": ["user", "manager", "admin"],
@@ -161,6 +165,7 @@ function normaliseUser(user) {
     return {
         user_id: user.user_id,
         customer_id: user.customer_id,
+        driver_id: user.driver_id,
         email: user.email,
         role: toUiRole(user.role),
 
