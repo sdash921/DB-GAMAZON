@@ -1343,7 +1343,8 @@ async function renderCourierManagement() {
             <td>${escapeHtml(c.phone)}</td><td>${escapeHtml(c.license_number)}</td>
             <td>${escapeHtml(c.vehicle_type || "—")} · ${escapeHtml(c.plate_number || "No vehicle")}<small>${c.capacity_kg ? `${Number(c.capacity_kg)} kg` : ""}</small></td>
             <td><span class="route-status" data-status="${escapeHtml(c.status)}">${escapeHtml(c.status)}</span></td></tr>`).join("");
-        const orderOptions = orders.map(o => `<option value="${Number(o.order_id)}" data-weight="${Number(o.weight_kg)}">#${Number(o.order_id)} · ${escapeHtml(o.pickup_city || "—")} → ${escapeHtml(o.delivery_city || "—")} · ${Number(o.weight_kg)} kg</option>`).join("");
+        const cityNames = [...new Set(orders.flatMap(o => [o.pickup_city, o.delivery_city]).filter(Boolean))].sort();
+        const orderOptions = orders.map(o => `<option value="${Number(o.order_id)}" data-pickup-city="${escapeHtml(o.pickup_city || "")}" data-delivery-city="${escapeHtml(o.delivery_city || "")}" data-weight="${Number(o.weight_kg)}">#${Number(o.order_id)} · ${escapeHtml(o.pickup_city || "—")} → ${escapeHtml(o.delivery_city || "—")} · ${Number(o.weight_kg)} kg · ${Number(o.route_distance_km || 0)} km</option>`).join("");
         const courierOptions = available.map(c => `<optgroup label="${escapeHtml(`${c.first_name} ${c.last_name}`)}">${`<option value="${Number(c.driver_id)}" data-vehicle="${Number(c.vehicle_id)}">${escapeHtml(`${c.plate_number} · ${c.vehicle_type} · ${Number(c.capacity_kg)} kg`)}</option>`}</optgroup>`).join("");
 
         panel.innerHTML = `
@@ -1364,17 +1365,37 @@ async function renderCourierManagement() {
               <div class="route-form-actions"><button class="btn btn-primary" type="submit">Create courier account</button><span id="courierCreateFeedback" role="status"></span></div>
             </form>
           </section>
-          <section class="route-form-card"><h5>Assign courier to local order</h5>
+          <section class="route-form-card"><h5>City Dispatch — assign courier to a same-city order</h5>
+            <p class="ws-note">Only City Delivery orders appear here. Intercity orders stay in Route Management and require a planned depot route.</p>
             ${orders.length && available.length ? `<form id="assignCourierForm" class="route-form">
-              <label>Unassigned local order<select name="order_id" required>${orderOptions}</select></label>
-              <label>Available courier and vehicle<select name="driver_vehicle" required>${available.map(c=>`<option value="${Number(c.driver_id)}:${Number(c.vehicle_id)}">${escapeHtml(`${c.first_name} ${c.last_name} — ${c.plate_number} (${Number(c.capacity_kg)} kg)`)}</option>`).join("")}</select></label>
+              <div class="route-form-grid">
+                <label>Filter pickup city<select id="dispatchPickupFilter"><option value="">All pickup cities</option>${cityNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select></label>
+                <label>Filter delivery city<select id="dispatchDeliveryFilter"><option value="">All delivery cities</option>${cityNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select></label>
+                <label class="dispatch-order-field">Unassigned city order<select name="order_id" id="dispatchOrderSelect" required>${orderOptions}</select></label>
+                <label>Available courier and vehicle<select name="driver_vehicle" required>${available.map(c=>`<option value="${Number(c.driver_id)}:${Number(c.vehicle_id)}">${escapeHtml(`${c.first_name} ${c.last_name} — ${c.plate_number} (${Number(c.capacity_kg)} kg)`)}</option>`).join("")}</select></label>
+              </div>
               <div class="route-form-actions"><button class="btn btn-primary" type="submit">Assign courier</button><span id="courierAssignFeedback" role="status"></span></div>
-            </form>` : `<p class="ws-empty">${!orders.length ? "No unassigned local orders are currently waiting." : "No available courier with a registered vehicle. Add a courier or wait until one becomes available."}</p>`}
+            </form>` : `<p class="ws-empty">${!orders.length ? "No unassigned same-city deliveries are currently waiting." : "No available courier with a registered vehicle. Add a courier or wait until one becomes available."}</p>`}
+            ${orders.length ? `<div class="route-table-wrap"><table class="route-table"><thead><tr><th>Order</th><th>Pickup address</th><th>Delivery address</th><th>Distance</th><th>Weight</th></tr></thead><tbody>${orders.map(o=>`<tr><td>#${Number(o.order_id)}</td><td>${escapeHtml(`${o.pickup_city||"—"}, ${o.pickup_street||""} ${o.pickup_building||""}`)}</td><td>${escapeHtml(`${o.delivery_city||"—"}, ${o.delivery_street||""} ${o.delivery_building||""}`)}</td><td>${Number(o.route_distance_km||0)} km</td><td>${Number(o.weight_kg)} kg</td></tr>`).join("")}</tbody></table></div>` : ""}
           </section>
           <section class="route-list-card"><h5>Registered couriers (${couriers.length})</h5>
             ${couriers.length ? `<div class="route-table-wrap"><table class="route-table"><thead><tr><th>ID</th><th>Courier / account</th><th>Phone</th><th>License</th><th>Vehicle</th><th>Status</th></tr></thead><tbody>${courierRows}</tbody></table></div>` : '<p class="ws-empty">No couriers registered yet.</p>'}
           </section>`;
         document.getElementById("refreshCouriers")?.addEventListener("click", renderCourierManagement);
+        const filterDispatchOrders = () => {
+            const pickup = document.getElementById("dispatchPickupFilter")?.value || "";
+            const delivery = document.getElementById("dispatchDeliveryFilter")?.value || "";
+            const select = document.getElementById("dispatchOrderSelect");
+            if (!select) return;
+            [...select.options].forEach(option => {
+                option.hidden = Boolean((pickup && option.dataset.pickupCity !== pickup) ||
+                                         (delivery && option.dataset.deliveryCity !== delivery));
+            });
+            const firstVisible = [...select.options].find(option => !option.hidden);
+            if (firstVisible) select.value = firstVisible.value;
+        };
+        document.getElementById("dispatchPickupFilter")?.addEventListener("change", filterDispatchOrders);
+        document.getElementById("dispatchDeliveryFilter")?.addEventListener("change", filterDispatchOrders);
     } catch (error) {
         if (SESSION?.token === token && activeWsTab === "couriers") panel.innerHTML = `<h4>Courier Management</h4><p class="ws-empty">${escapeHtml(error.message)}</p>`;
     }
