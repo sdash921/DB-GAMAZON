@@ -1948,3 +1948,14 @@ img {
 .route-status[data-status="Planned"] { color:#18845a; background:#eaf8f1; border-color:#bde8d2; }
 .route-status[data-status="Assigned"] { color:#946200; background:#fff7df; border-color:#f0dfa9; }
 @media(max-width:600px) { .route-form-actions { align-items:flex-start; flex-direction:column; } }
+
+/* Interactive delivery route map */
+.route-map-panel { margin: 8px 0 18px; padding: 14px; border: 1px solid var(--line, #dce3ed); border-radius: 15px; background: #f9fbff; }
+.route-map-heading { display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:12px; }
+.route-map-heading strong { display:block; font-size:.95rem; }
+.route-map-heading p,.route-map-note { color:var(--muted, #748094); font-size:.8rem; margin:3px 0 0; }
+#deliveryMap { height:360px; width:100%; border-radius:12px; border:1px solid #d8e0ec; z-index:1; }
+.route-map-summary { display:flex; flex-wrap:wrap; gap:10px 20px; margin-top:12px; font-size:.84rem; font-weight:700; color:#263754; }
+.route-map-summary span { background:#edf3ff; border-radius:9px; padding:7px 10px; }
+.route-map-note { line-height:1.45; margin-top:9px; }
+@media(max-width:700px) { .route-map-heading { align-items:flex-start; flex-direction:column; } #deliveryMap { height:290px; } }
