@@ -1959,3 +1959,34 @@ img {
 .route-map-summary span { background:#edf3ff; border-radius:9px; padding:7px 10px; }
 .route-map-note { line-height:1.45; margin-top:9px; }
 @media(max-width:700px) { .route-map-heading { align-items:flex-start; flex-direction:column; } #deliveryMap { height:290px; } }
+
+
+/* Address autocomplete for Russian/Kazakh/English OSM queries */
+.address-suggestions {
+    display: grid;
+    gap: 4px;
+    margin: 6px 0 10px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(22,32,58,.10);
+    position: relative;
+    z-index: 5;
+}
+.address-suggestion {
+    width: 100%;
+    border: 0;
+    border-radius: 7px;
+    padding: 9px 10px;
+    text-align: left;
+    color: var(--text);
+    background: #fff;
+    font: inherit;
+    font-size: .84rem;
+    cursor: pointer;
+}
+.address-suggestion:hover, .address-suggestion:focus {
+    background: var(--accent-soft);
+    outline: none;
+}
