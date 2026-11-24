@@ -911,7 +911,11 @@ function workspaceTabs(role) {
     if (Auth.can(role, "orders:read:own")) tabs.push({ id: "my-orders", label: "My orders" });
     if (Auth.can(role, "orders:read:all")) tabs.push({ id: "all-orders", label: "All orders" });
     if (Auth.can(role, "orders:update:status")) tabs.push({ id: "fulfil", label: "Fulfilment" });
-    if (Auth.can(role, "routes:manage")) tabs.push({ id: "routes", label: "Route Management" });
+    if (Auth.can(role, "routes:manage")) {
+        tabs.push({ id: "routes", label: "Route Management" });
+        tabs.push({ id: "couriers", label: "Courier Management" });
+    }
+    if (role === "courier") tabs.push({ id: "my-deliveries", label: "My deliveries" });
     if (Auth.can(role, "users:read")) {
         tabs.push({ id: "analytics", label: "Analytics" });
         tabs.push({ id: "users", label: "Users & roles" });
@@ -1312,6 +1316,90 @@ async function renderRouteManagement() {
     }
 }
 
+
+async function renderCourierManagement() {
+    const panel = document.getElementById("wsPanel");
+    const token = SESSION?.token;
+    panel.innerHTML = '<h4>Courier Management</h4><p>Loading couriers and unassigned orders…</p>';
+    const headers = { Authorization: `Bearer ${token}` };
+    try {
+        const [courierRes, orderRes] = await Promise.all([
+            fetch(`${Auth.API_BASE}/api/couriers`, { headers }),
+            fetch(`${Auth.API_BASE}/api/couriers/unassigned-orders`, { headers })
+        ]);
+        const [courierData, orderData] = await Promise.all([
+            courierRes.json().catch(()=>({})), orderRes.json().catch(()=>({}))
+        ]);
+        if (!courierRes.ok) throw new Error(courierData.message || `Couriers HTTP ${courierRes.status}`);
+        if (!orderRes.ok) throw new Error(orderData.message || `Orders HTTP ${orderRes.status}`);
+        if (SESSION?.token !== token || activeWsTab !== "couriers") return;
+
+        const couriers = courierData.couriers || [];
+        const available = couriers.filter(c => c.status === "Available" && c.vehicle_id);
+        const orders = orderData.orders || [];
+        const courierRows = couriers.map(c => `
+          <tr><td>#${Number(c.driver_id)}</td>
+            <td><strong>${escapeHtml(`${c.first_name} ${c.last_name}`)}</strong><small>${escapeHtml(c.email || "No login")}</small></td>
+            <td>${escapeHtml(c.phone)}</td><td>${escapeHtml(c.license_number)}</td>
+            <td>${escapeHtml(c.vehicle_type || "—")} · ${escapeHtml(c.plate_number || "No vehicle")}<small>${c.capacity_kg ? `${Number(c.capacity_kg)} kg` : ""}</small></td>
+            <td><span class="route-status" data-status="${escapeHtml(c.status)}">${escapeHtml(c.status)}</span></td></tr>`).join("");
+        const orderOptions = orders.map(o => `<option value="${Number(o.order_id)}" data-weight="${Number(o.weight_kg)}">#${Number(o.order_id)} · ${escapeHtml(o.pickup_city || "—")} → ${escapeHtml(o.delivery_city || "—")} · ${Number(o.weight_kg)} kg</option>`).join("");
+        const courierOptions = available.map(c => `<optgroup label="${escapeHtml(`${c.first_name} ${c.last_name}`)}">${`<option value="${Number(c.driver_id)}" data-vehicle="${Number(c.vehicle_id)}">${escapeHtml(`${c.plate_number} · ${c.vehicle_type} · ${Number(c.capacity_kg)} kg`)}</option>`}</optgroup>`).join("");
+
+        panel.innerHTML = `
+          <div class="route-management-head"><div><h4>Courier Management</h4><p class="ws-note">Create real courier accounts, register vehicles and assign eligible local orders.</p></div><button class="ws-link" id="refreshCouriers" type="button">Refresh</button></div>
+          <section class="route-form-card"><h5>Add new courier</h5>
+            <form id="createCourierForm" class="route-form">
+              <div class="route-form-grid">
+                <label>First name<input name="first_name" maxlength="80" required></label>
+                <label>Last name<input name="last_name" maxlength="80" required></label>
+                <label>Phone<input name="phone" maxlength="25" required></label>
+                <label>License number<input name="license_number" maxlength="40" required></label>
+                <label>Login email<input name="email" type="email" maxlength="254" required></label>
+                <label>Temporary password<input name="password" type="password" minlength="8" maxlength="72" required autocomplete="new-password"></label>
+                <label>Vehicle type<input name="vehicle_type" placeholder="Car / Van / Motorcycle" required></label>
+                <label>Plate number<input name="plate_number" maxlength="30" required></label>
+                <label>Capacity (kg)<input name="capacity_kg" type="number" min="0.1" step="0.1" required></label>
+              </div>
+              <div class="route-form-actions"><button class="btn btn-primary" type="submit">Create courier account</button><span id="courierCreateFeedback" role="status"></span></div>
+            </form>
+          </section>
+          <section class="route-form-card"><h5>Assign courier to local order</h5>
+            ${orders.length && available.length ? `<form id="assignCourierForm" class="route-form">
+              <label>Unassigned local order<select name="order_id" required>${orderOptions}</select></label>
+              <label>Available courier and vehicle<select name="driver_vehicle" required>${available.map(c=>`<option value="${Number(c.driver_id)}:${Number(c.vehicle_id)}">${escapeHtml(`${c.first_name} ${c.last_name} — ${c.plate_number} (${Number(c.capacity_kg)} kg)`)}</option>`).join("")}</select></label>
+              <div class="route-form-actions"><button class="btn btn-primary" type="submit">Assign courier</button><span id="courierAssignFeedback" role="status"></span></div>
+            </form>` : `<p class="ws-empty">${!orders.length ? "No unassigned local orders are currently waiting." : "No available courier with a registered vehicle. Add a courier or wait until one becomes available."}</p>`}
+          </section>
+          <section class="route-list-card"><h5>Registered couriers (${couriers.length})</h5>
+            ${couriers.length ? `<div class="route-table-wrap"><table class="route-table"><thead><tr><th>ID</th><th>Courier / account</th><th>Phone</th><th>License</th><th>Vehicle</th><th>Status</th></tr></thead><tbody>${courierRows}</tbody></table></div>` : '<p class="ws-empty">No couriers registered yet.</p>'}
+          </section>`;
+        document.getElementById("refreshCouriers")?.addEventListener("click", renderCourierManagement);
+    } catch (error) {
+        if (SESSION?.token === token && activeWsTab === "couriers") panel.innerHTML = `<h4>Courier Management</h4><p class="ws-empty">${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function renderMyCourierDeliveries() {
+    const panel = document.getElementById("wsPanel");
+    const token = SESSION?.token;
+    panel.innerHTML = '<h4>My deliveries</h4><p>Loading assignments…</p>';
+    try {
+        const response = await fetch(`${Auth.API_BASE}/api/couriers/me/assignments`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await response.json().catch(()=>({}));
+        if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+        if (SESSION?.token !== token || activeWsTab !== "my-deliveries") return;
+        panel.innerHTML = `<h4>My deliveries (${(data.assignments||[]).length})</h4>
+          ${(data.assignments||[]).map(a=>`<article class="route-form-card"><h5>Order #${Number(a.order_id)} · ${escapeHtml(a.status)}</h5>
+            <p class="ws-note">${escapeHtml(`${a.pickup_city||"—"}, ${a.pickup_street||""} → ${a.delivery_city||"—"}, ${a.delivery_street||""}`)}</p>
+            <p class="ws-note">Tracking: ${escapeHtml(a.tracking_number||"—")} · ${Number(a.weight_kg)} kg</p>
+            ${["Assigned","Picked Up","In Transit"].includes(a.status)?`<label>Update delivery status<select data-courier-status="${Number(a.assignment_id)}">${["Assigned","Picked Up","In Transit","Delivered"].map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select></label><button class="ws-link" data-courier-save="${Number(a.assignment_id)}">Save status</button>`:""}
+          </article>`).join("") || '<p class="ws-empty">No deliveries assigned to you yet.</p>'}`;
+    } catch(error) {
+        if (SESSION?.token === token && activeWsTab === "my-deliveries") panel.innerHTML=`<h4>My deliveries</h4><p class="ws-empty">${escapeHtml(error.message)}</p>`;
+    }
+}
+
 async function renderWsPanel(tab) {
     const panel = document.getElementById("wsPanel");
     const u = SESSION.user;
@@ -1405,7 +1493,7 @@ function renderMatrix() {
     tbody.innerHTML = Object.entries(Auth.PERMISSIONS).map(([perm, roles]) => `
         <tr>
             <td><code>${perm}</code></td>
-            ${["user", "manager", "admin"].map(r => `
+            ${["user", "manager", "admin", "courier"].map(r => `
                 <td class="${roles.includes(r) ? "yes" : "no"}${r === mine ? " mine" : ""}">
                     ${roles.includes(r) ? "✓" : "—"}
                 </td>`).join("")}
@@ -1421,7 +1509,49 @@ document.getElementById("wsTabs").addEventListener("click", e => {
 });
 
 
+document.getElementById("wsPanel").addEventListener("click", async e => {
+    const save=e.target.closest("[data-courier-save]");
+    if (!save) return;
+    const id=save.dataset.courierSave;
+    const select=document.querySelector(`[data-courier-status="${id}"]`);
+    save.disabled=true;
+    try {
+        const response=await fetch(`${Auth.API_BASE}/api/couriers/me/assignments/${id}/status`,{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SESSION?.token}`},body:JSON.stringify({status:select.value})});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.message||`HTTP ${response.status}`);
+        await renderMyCourierDeliveries();
+    } catch(error) { alert(error.message); save.disabled=false; }
+});
+
 document.getElementById("wsPanel").addEventListener("submit", async e => {
+    if (e.target.id === "createCourierForm") {
+        e.preventDefault();
+        const form=e.target, feedback=document.getElementById("courierCreateFeedback"), button=form.querySelector('button[type="submit"]');
+        const payload=Object.fromEntries(new FormData(form).entries());
+        payload.capacity_kg=Number(payload.capacity_kg);
+        button.disabled=true; feedback.textContent="Creating courier…";
+        try {
+            const response=await fetch(`${Auth.API_BASE}/api/couriers`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SESSION?.token}`},body:JSON.stringify(payload)});
+            const data=await response.json().catch(()=>({}));
+            if(!response.ok) throw new Error(data.message||`HTTP ${response.status}`);
+            feedback.textContent=`Created: ${data.account.email}. Courier can now sign in.`;
+            form.reset(); await renderCourierManagement();
+        } catch(error) { feedback.textContent=error.message; button.disabled=false; }
+        return;
+    }
+    if (e.target.id === "assignCourierForm") {
+        e.preventDefault();
+        const form=e.target, feedback=document.getElementById("courierAssignFeedback"), button=form.querySelector('button[type="submit"]');
+        const [driver_id,vehicle_id]=form.elements.driver_vehicle.value.split(":").map(Number);
+        button.disabled=true; feedback.textContent="Assigning…";
+        try {
+            const response=await fetch(`${Auth.API_BASE}/api/couriers/assignments`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SESSION?.token}`},body:JSON.stringify({order_id:Number(form.elements.order_id.value),driver_id,vehicle_id})});
+            const data=await response.json().catch(()=>({}));
+            if(!response.ok) throw new Error(data.message||`HTTP ${response.status}`);
+            feedback.textContent="Courier assigned successfully."; await renderCourierManagement();
+        } catch(error) { feedback.textContent=error.message; button.disabled=false; }
+        return;
+    }
     if (e.target.id !== "createRouteForm") return;
     e.preventDefault();
     const form = e.target;
