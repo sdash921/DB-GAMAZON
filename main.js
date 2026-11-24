@@ -1422,6 +1422,16 @@ async function renderWsPanel(tab) {
         return;
     }
 
+    if (tab === "couriers") {
+        await renderCourierManagement();
+        return;
+    }
+
+    if (tab === "my-deliveries") {
+        await renderMyCourierDeliveries();
+        return;
+    }
+
     if (tab === "users") {
         /* users:read is admin-only. Ask the SERVER — a non-admin gets a real
            403 from middleware/role.js, which is what makes RBAC verifiable. */
