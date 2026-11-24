@@ -122,10 +122,16 @@ async function trackDelivery(trackingNumber) {
             const requestId = created.request?.request_id;
             if (!requestId) throw new Error("The server created a request but did not return its ID.");
 
+            if (created.delivery_mode === "City") {
+                showMessage(`Request #${requestId} detected as a same-city delivery. A courier will be assigned directly; no depot route is needed.`, true);
+                results.innerHTML = `<div class="delivery-empty"><strong>City delivery · ${escapeHtml(payload.pickup.city)}</strong><p>${escapeHtml(payload.pickup.street)}, ${escapeHtml(payload.pickup.building)} → ${escapeHtml(payload.delivery.street)}, ${escapeHtml(payload.delivery.building)}</p><p>Distance: ${payload.route_preview.distance_km ?? "—"} km. Confirm the request and it will appear in the manager's City Dispatch queue.</p><button class="btn btn-primary" type="button" data-confirm-local="${requestId}">Confirm city delivery</button></div>`;
+                return;
+            }
+
             const data = await getDeliveryOptions(requestId);
-            showMessage(`Request #${requestId} created. ${data.options_count} matching route(s) found.`, true);
+            showMessage(`Request #${requestId} created as intercity. ${data.options_count} matching route(s) found.`, true);
             if (!data.options?.length) {
-                results.innerHTML = `<div class="delivery-empty"><strong>Local delivery is available.</strong><p>There is no matching intercity route for ${escapeHtml(payload.pickup.city)} → ${escapeHtml(payload.delivery.city)}. You can place this as a city delivery; a manager will assign a courier.</p><button class="btn btn-primary" type="button" data-confirm-local="${requestId}">Confirm city delivery</button></div>`;
+                results.innerHTML = `<div class="delivery-empty"><strong>No matching intercity route found.</strong><p>Your request ${escapeHtml(payload.pickup.city)} → ${escapeHtml(payload.delivery.city)} has been saved, but it is not confirmed yet. A manager must create a matching intercity route before you can book it.</p></div>`;
                 return;
             }
             results.innerHTML = data.options.map((option, index) => optionCard(option, requestId, index)).join("");
