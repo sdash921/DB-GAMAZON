@@ -111,7 +111,7 @@
             <div>
                 <p class="eyebrow">Logistics service</p>
                 <h2>Send a parcel</h2>
-                <p>Create a delivery request, compare available routes and confirm your shipment.</p>
+                <p>Same city: direct courier delivery between two addresses. Different cities: choose an intercity depot route.</p>
             </div>
         </div>
 
@@ -169,6 +169,7 @@
                     <label>Width (cm)<input name="width_cm" type="number" min="1" step="1" placeholder="20"></label>
                     <label>Height (cm)<input name="height_cm" type="number" min="1" step="1" placeholder="15"></label>
                 </div>
+                <p class="delivery-mode-hint" id="deliveryModeHint">Delivery mode is detected automatically: same city → City Delivery; different cities → Intercity Delivery.</p>
                 <div class="delivery-details-grid delivery-bottom-grid">
                     <label>Service type
                         <select name="delivery_type" required><option value="Standard">Standard</option><option value="Express">Express</option></select>
