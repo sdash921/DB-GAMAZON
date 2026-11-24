@@ -24,6 +24,9 @@ async function confirmDelivery(requestId, routeId) {
         method: "POST", body: { route_id: Number(routeId) }
     });
 }
+async function confirmLocalDelivery(requestId) {
+    return deliveryRequest(`/api/delivery-requests/${encodeURIComponent(requestId)}/confirm-local`, { method: "POST", body: {} });
+}
 async function trackDelivery(trackingNumber) {
     return deliveryRequest(`/api/tracking/${encodeURIComponent(trackingNumber)}`);
 }
@@ -122,7 +125,7 @@ async function trackDelivery(trackingNumber) {
             const data = await getDeliveryOptions(requestId);
             showMessage(`Request #${requestId} created. ${data.options_count} matching route(s) found.`, true);
             if (!data.options?.length) {
-                results.innerHTML = `<div class="delivery-empty">Request #${requestId} was saved, but no route currently matches ${escapeHtml(payload.pickup.city)} → ${escapeHtml(payload.delivery.city)} on or after ${escapeHtml(payload.requested_date)}. Try another date or city pair.</div>`;
+                results.innerHTML = `<div class="delivery-empty"><strong>Local delivery is available.</strong><p>There is no matching intercity route for ${escapeHtml(payload.pickup.city)} → ${escapeHtml(payload.delivery.city)}. You can place this as a city delivery; a manager will assign a courier.</p><button class="btn btn-primary" type="button" data-confirm-local="${requestId}">Confirm city delivery</button></div>`;
                 return;
             }
             results.innerHTML = data.options.map((option, index) => optionCard(option, requestId, index)).join("");
@@ -136,6 +139,17 @@ async function trackDelivery(trackingNumber) {
     });
 
     results.addEventListener("click", async event => {
+        const localButton = event.target.closest("[data-confirm-local]");
+        if (localButton) {
+            try {
+                requireCustomer(); localButton.disabled=true; localButton.textContent="Confirming…";
+                const confirmed=await confirmLocalDelivery(localButton.dataset.confirmLocal);
+                const tracking=confirmed.parcel?.tracking_number;
+                results.innerHTML=`<div class="delivery-confirmed"><strong>City delivery confirmed!</strong><br>Order #${confirmed.order?.order_id} created. A manager will assign a courier.<br>Tracking number:<br><code>${escapeHtml(tracking||"Not returned")}</code>${tracking?`<button type="button" class="btn btn-primary" id="trackNewParcel" data-tracking="${escapeHtml(tracking)}">Track parcel</button>`:""}</div>`;
+                showMessage("City delivery created. Waiting for courier assignment.",true);
+            } catch(error) { localButton.disabled=false; localButton.textContent="Confirm city delivery"; showMessage(error.message||"Could not confirm city delivery."); }
+            return;
+        }
         const button = event.target.closest("[data-confirm-route]");
         if (!button) return;
         try {
